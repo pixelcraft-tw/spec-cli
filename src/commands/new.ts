@@ -127,9 +127,55 @@ Output format:
 }
 
 async function createFromJira(name: string, tickets: string[], state: StateManager): Promise<void> {
-  display.error('Jira MCP integration requires an MCP connection. Please ensure Jira MCP is configured.');
-  display.info('Creating blank spec instead. Add Jira content manually.');
-  createBlank(name, state);
+  display.info(`Fetching Jira tickets: ${tickets.join(', ')}...`);
+
+  try {
+    const config = state.readConfig();
+    const backend = createBackend(config.backend.default);
+
+    if (!(await backend.isAvailable())) {
+      display.error(`Backend "${config.backend.default}" is not available.`);
+      createBlank(name, state);
+      display.warn('Created blank spec instead.');
+      return;
+    }
+
+    const ticketList = tickets.map((t) => `- ${t}`).join('\n');
+    const prompt = `You have access to a Jira MCP server. Use it to read the following tickets and generate a feature spec.
+
+Tickets:
+${ticketList}
+
+For each ticket, retrieve: summary, description, acceptance criteria, labels, and priority.
+
+Then combine the information into a single feature spec in this format:
+
+# Feature: ${name}
+
+## Context
+(2-3 sentences of background, derived from ticket descriptions)
+
+## Requirements
+(Numbered list with acceptance criteria, merged from all tickets)
+
+## Constraints
+(Technical limitations mentioned in tickets)
+
+## Source Tickets
+${ticketList}
+
+## Notes
+(Additional notes from ticket comments or labels)
+
+If you cannot access Jira MCP, output the spec template with the ticket IDs listed so the user can fill in details manually.`;
+
+    const result = await backend.execute(prompt);
+    fs.writeFileSync(state.specPath(name), result.output, 'utf-8');
+    display.success(`Generated spec from ${tickets.length} Jira ticket(s).`);
+  } catch (err) {
+    display.warn(`Jira integration failed: ${err}. Creating blank spec.`);
+    createBlank(name, state);
+  }
 }
 
 async function createInteractive(name: string, state: StateManager): Promise<void> {

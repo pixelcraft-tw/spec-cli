@@ -5,7 +5,7 @@ import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
 import { parsePlan } from '../parsers/plan.js';
 import { assemblePrompt } from '../utils/prompt.js';
-import { gitBranch, gitCommit, gitDiff, gitDiffBranch, gitCheckout, gitMerge } from '../git/operations.js';
+import { gitBranch, gitCommit, gitDiff, gitDiffBranch, gitCheckout, gitMerge, gitCurrentBranch } from '../git/operations.js';
 import * as display from '../utils/display.js';
 
 export async function implementCommand(
@@ -38,8 +38,9 @@ export async function implementCommand(
 
   // Pre-flight: create branch if first run
   if (feature.phase === 'ready_to_implement') {
+    const baseBranch = gitCurrentBranch();
     const branchName = feature.branch || `${feature.type}/${name}`;
-    display.info(`Creating branch: ${branchName}`);
+    display.info(`Creating branch: ${branchName} (from ${baseBranch})`);
     try {
       gitBranch(branchName);
     } catch {
@@ -48,12 +49,17 @@ export async function implementCommand(
     }
     feature.phase = 'implementing';
     feature.branch = branchName;
+    feature.base_branch = baseBranch;
     state.upsertFeature(feature);
   }
 
   // Determine test strategy
   const testConfig = parseTestOptions(options.test);
+  const baseBranch = feature.base_branch || 'main';
   let sessionId = feature.session?.id ?? '';
+
+  // Ensure reviews dir exists once
+  fs.mkdirSync(state.reviewsDir(), { recursive: true });
 
   // Execute tasks
   for (let i = 0; i < feature.tasks.length; i++) {
@@ -73,6 +79,7 @@ export async function implementCommand(
     // Build prompt
     const templateName = testConfig.tdd ? 'implement-tdd' : 'implement';
     const previousDiff = i > 0 ? getDiffSummary() : '';
+    let taskDiff = previousDiff; // reused after commit
 
     const prompt = assemblePrompt({
       templateName,
@@ -100,16 +107,18 @@ export async function implementCommand(
       display.warn('Nothing to commit or commit failed.');
     }
 
+    // Get diff once after commit — reused for tests and review
+    taskDiff = getDiffSummary();
+
     // Post-hoc tests (if not TDD)
     if (testConfig.postHoc) {
       display.info('Generating tests...');
-      const diff = getDiffSummary();
       const testType = testConfig.intg ? 'integration' : 'unit';
       const testPrompt = assemblePrompt({
         templateName: 'test',
         vars: {
           test_type: testType,
-          git_diff: diff,
+          git_diff: taskDiff,
           task_content: taskSpec.raw,
         },
       });
@@ -124,11 +133,10 @@ export async function implementCommand(
 
     // AI Review
     display.info('Running AI review...');
-    const diff = getDiffSummary();
     const reviewPrompt = assemblePrompt({
       templateName: 'review',
       vars: {
-        git_diff: diff,
+        git_diff: taskDiff,
         task_content: taskSpec.raw,
       },
       agents: args.agents,
@@ -139,7 +147,6 @@ export async function implementCommand(
     sessionId = reviewResult.sessionId;
 
     // Save review
-    fs.mkdirSync(state.reviewsDir(), { recursive: true });
     fs.writeFileSync(state.reviewPath(name, i + 1), reviewResult.output, 'utf-8');
 
     task.status = 'review_pending';
@@ -196,7 +203,7 @@ export async function implementCommand(
     if (!options.skipReview) {
       display.info('Running final branch code review...');
       try {
-        const branchDiff = gitDiffBranch('main');
+        const branchDiff = gitDiffBranch(baseBranch);
         const specContent = fs.existsSync(state.specPath(name))
           ? fs.readFileSync(state.specPath(name), 'utf-8')
           : '(spec not found)';
@@ -217,7 +224,6 @@ export async function implementCommand(
         sessionId = finalReviewResult.sessionId;
 
         // Save final review
-        fs.mkdirSync(state.reviewsDir(), { recursive: true });
         const finalReviewPath = path.join(state.reviewsDir(), `${name}-final.md`);
         fs.writeFileSync(finalReviewPath, finalReviewResult.output, 'utf-8');
 
@@ -238,12 +244,11 @@ export async function implementCommand(
     ]);
 
     if (merge === 'merge' || merge === 'squash-merge') {
-      const originalBranch = 'main'; // TODO: detect original branch
-      gitCheckout(originalBranch);
+      gitCheckout(baseBranch);
       gitMerge(feature.branch, merge === 'squash-merge');
       feature.phase = 'merged';
       state.upsertFeature(feature);
-      display.success(`Merged ${feature.branch} into ${originalBranch}.`);
+      display.success(`Merged ${feature.branch} into ${baseBranch}.`);
     } else {
       display.info(`Branch ${feature.branch} kept. Merge manually when ready.`);
     }

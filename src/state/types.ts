@@ -29,6 +29,7 @@ export interface FeatureState {
   feature: string;
   type: FeatureType;
   branch: string;
+  base_branch?: string;
   phase: Phase;
   total_tasks: number;
   current_task: number;
@@ -68,9 +69,8 @@ export const PHASE_GUARDS: Record<string, Phase[]> = {
   implement: ['ready_to_implement', 'implementing'],
   review: ['implementing', 'completed'],
   status: [], // any phase
-  mcp: [], // any phase
-  agent: [], // any phase
-  skill: [], // any phase
+  reset: [], // any phase
+  diff: ['ready_to_implement', 'implementing', 'completed', 'merged'],
 };
 
 // Valid task status transitions

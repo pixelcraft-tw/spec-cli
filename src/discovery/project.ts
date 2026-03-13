@@ -16,6 +16,22 @@ export function detectProject(cwd: string = process.cwd()): ProjectInfo {
     lang_framework: '',
   };
 
+  // Flutter (must come before Node.js — Flutter uses pubspec.yaml, not package.json)
+  const pubspecPath = path.join(cwd, 'pubspec.yaml');
+  if (fs.existsSync(pubspecPath)) {
+    const content = fs.readFileSync(pubspecPath, 'utf-8');
+    if (content.includes('flutter:') || content.includes('sdk: flutter')) {
+      const nameMatch = content.match(/^name:\s*(.+)$/m);
+      if (nameMatch) {
+        info.name = nameMatch[1].trim();
+      }
+      info.language = 'dart';
+      info.framework = 'flutter';
+      info.lang_framework = 'dart-flutter';
+      return info;
+    }
+  }
+
   // Node.js / TypeScript
   const pkgPath = path.join(cwd, 'package.json');
   if (fs.existsSync(pkgPath)) {
@@ -64,6 +80,38 @@ export function detectProject(cwd: string = process.cwd()): ProjectInfo {
     const content = fs.readFileSync(path.join(cwd, csprojFiles[0]), 'utf-8');
     info.lang_framework = detectCsharpFramework(content);
     return info;
+  }
+
+  // iOS (*.xcodeproj directory at root)
+  const entries = fs.readdirSync(cwd);
+  const xcodeprojDir = entries.find((e) => e.endsWith('.xcodeproj'));
+  if (xcodeprojDir) {
+    const stat = fs.statSync(path.join(cwd, xcodeprojDir));
+    if (stat.isDirectory()) {
+      info.name = xcodeprojDir.replace('.xcodeproj', '');
+      info.language = 'swift';
+      info.framework = 'ios';
+      info.lang_framework = 'swift-ios';
+      return info;
+    }
+  }
+
+  // Android (build.gradle.kts or build.gradle with android plugin)
+  const gradleKts = path.join(cwd, 'build.gradle.kts');
+  const gradleGroovy = path.join(cwd, 'build.gradle');
+  const gradlePath = fs.existsSync(gradleKts) ? gradleKts : fs.existsSync(gradleGroovy) ? gradleGroovy : null;
+  if (gradlePath) {
+    const content = fs.readFileSync(gradlePath, 'utf-8');
+    if (content.includes('com.android.application') || content.includes('com.android.library')) {
+      const nameMatch = content.match(/namespace\s*=?\s*["']([^"']+)["']/);
+      if (nameMatch) {
+        info.name = nameMatch[1].split('.').pop() || info.name;
+      }
+      info.language = 'kotlin';
+      info.framework = 'android';
+      info.lang_framework = 'kotlin-android';
+      return info;
+    }
   }
 
   return info;

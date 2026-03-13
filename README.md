@@ -1,17 +1,17 @@
-# @pixel613/spec (pxs)
+# @pixelcraft-tw/spec (pxs)
 
 Spec-driven development CLI for Claude Code. Write a spec, refine a plan, implement task by task — all powered by AI.
 
-`@pixel613/spec` 是一套為 Claude Code 設計的規格驅動開發 CLI。撰寫規格、拆解計畫、逐步實作，全程 AI 驅動。
+`@pixelcraft-tw/spec` 是一套為 Claude Code 設計的規格驅動開發 CLI。撰寫規格、拆解計畫、逐步實作，全程 AI 驅動。
 
-> **Supported backend: Claude Code only**
+> **Supported backends: Claude Code**
 
 ---
 
 ## Installation / 安裝
 
 ```bash
-npm install -g @pixel613/spec
+npm install -g @pixelcraft-tw/spec
 ```
 
 ## Quick Start / 快速開始
@@ -56,7 +56,7 @@ Create a new spec file under `.workflow/specs/`.
 | Option | Description |
 |--------|-------------|
 | `--desc <text>` | Generate spec from text description / 從文字描述產生規格 |
-| `--jira <tickets...>` | Import from Jira tickets / 從 Jira ticket 匯入 |
+| `--jira <tickets...>` | Import from Jira tickets via MCP / 透過 Jira MCP 匯入 ticket 內容 |
 | `-i, --interactive` | Interactive Q&A mode / 互動問答模式 |
 
 ### `pxs refine <name>`
@@ -120,12 +120,31 @@ View workflow status. Without `<name>`, lists all features.
 
 查看工作流狀態。不帶 `<name>` 則列出所有 feature。
 
+### `pxs reset <name>`
+
+Reset a feature's phase when state gets stuck. Clears downstream state (tasks, session) as appropriate.
+
+重置 feature 的 phase。當 state 卡住時使用，會清除對應的下游狀態。
+
+| Option | Description |
+|--------|-------------|
+| `--to <phase>` | Target phase (default: `spec_created`) / 目標 phase |
+
+Valid targets: `spec_created`, `clarifying`, `spec_approved`, `plan_pending_approval`, `ready_to_implement`
+
+### `pxs diff <name>`
+
+Show remaining tasks from the implementation plan, grouped by done/in-progress/remaining with progress percentage.
+
+顯示實作計畫中各 task 的完成狀態，分為已完成、進行中、待做，並顯示進度百分比。
+
 ## Workflow / 工作流程
 
 ```
 pxs init → pxs new → pxs refine → pxs implement → merge
-                         │
-                     pxs clarify (optional)
+                         │                │
+                     pxs clarify      pxs diff (check progress)
+                     (optional)       pxs reset (unstick)
 ```
 
 ```
@@ -155,6 +174,8 @@ After `pxs init`, the following slash commands are available in Claude Code:
 | `/pxs:implement` | Implement task by task / 逐步實作 |
 | `/pxs:review` | View reviews / 查看 review |
 | `/pxs:status` | Check status / 查看狀態 |
+| `/pxs:reset` | Reset feature phase / 重置 feature 狀態 |
+| `/pxs:diff` | Show task progress / 查看 task 進度 |
 
 ## Project Structure / 專案結構
 

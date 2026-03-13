@@ -65,12 +65,13 @@ Present task summary.
 
 #### Final Code Review
 Before presenting merge options (skip if `--skip-review` was passed):
-1. Get full branch diff: `git diff $(git merge-base main HEAD)..HEAD`
+1. Get full branch diff: `git diff $(git merge-base <base-branch> HEAD)..HEAD` (base branch from state.yaml `base_branch` field, fallback to `main`)
 2. Read spec and plan files
-3. Perform comprehensive review of all changes as a whole
+3. Perform **comprehensive code review** of all changes — read and analyze actual code, not just diff stats
 4. If @agents or /skills were specified, involve them in the review
-5. Save review to `.workflow/reviews/<name>-final.md`
-6. Present review findings to user
+5. If no agents/skills specified, proactively use available review tools (e.g., /simplify, /code-review, code-reviewer agent)
+6. Save review to `.workflow/reviews/<name>-final.md`
+7. Present review findings to user with severity labels (Critical/Warning/Info) and verdict (PASS/NEEDS_CHANGES)
 
 Options: [merge] [squash-merge] [keep-branch]
 

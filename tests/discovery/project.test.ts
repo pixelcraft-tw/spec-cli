@@ -128,5 +128,37 @@ describe('detectProject', () => {
       const info = detectProject(tmpDir);
       expect(info.lang_framework).toBe('csharp-aspnet');
     });
+
+    it('detects dart-flutter from pubspec.yaml with flutter SDK', () => {
+      fs.writeFileSync(
+        path.join(tmpDir, 'pubspec.yaml'),
+        'name: my_flutter_app\n\ndependencies:\n  flutter:\n    sdk: flutter\n'
+      );
+      const info = detectProject(tmpDir);
+      expect(info.language).toBe('dart');
+      expect(info.framework).toBe('flutter');
+      expect(info.lang_framework).toBe('dart-flutter');
+      expect(info.name).toBe('my_flutter_app');
+    });
+
+    it('detects swift-ios from .xcodeproj directory', () => {
+      fs.mkdirSync(path.join(tmpDir, 'MyApp.xcodeproj'));
+      const info = detectProject(tmpDir);
+      expect(info.language).toBe('swift');
+      expect(info.framework).toBe('ios');
+      expect(info.lang_framework).toBe('swift-ios');
+      expect(info.name).toBe('MyApp');
+    });
+
+    it('detects kotlin-android from build.gradle.kts with android plugin', () => {
+      fs.writeFileSync(
+        path.join(tmpDir, 'build.gradle.kts'),
+        'plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n}\n'
+      );
+      const info = detectProject(tmpDir);
+      expect(info.language).toBe('kotlin');
+      expect(info.framework).toBe('android');
+      expect(info.lang_framework).toBe('kotlin-android');
+    });
   });
 });

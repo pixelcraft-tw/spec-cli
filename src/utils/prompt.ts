@@ -18,7 +18,7 @@ export function loadPrompt(name: string, cwd: string = process.cwd()): string {
  * Substitute template variables in a prompt string.
  * Variables use {varName} syntax.
  */
-export function renderPrompt(template: string, vars: Record<string, string>): string {
+function renderPrompt(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
     result = result.replaceAll(`{${key}}`, value);
@@ -29,7 +29,7 @@ export function renderPrompt(template: string, vars: Record<string, string>): st
 /**
  * Build the agent/skill instruction block for prompt injection.
  */
-export function buildAgentSkillBlock(agents: string[], skills: string[]): string {
+function buildAgentSkillBlock(agents: string[], skills: string[]): string {
   const parts: string[] = [];
 
   if (agents.length > 0) {
@@ -49,7 +49,7 @@ export function buildAgentSkillBlock(agents: string[], skills: string[]): string
 /**
  * Load architecture constraints from .workflow/architecture.md if it exists.
  */
-export function loadArchitectureConstraint(cwd: string = process.cwd()): string {
+function loadArchitectureConstraint(cwd: string = process.cwd()): string {
   const archPath = path.join(cwd, WORKFLOW_DIR, 'architecture.md');
   if (!fs.existsSync(archPath)) return '';
 
@@ -66,6 +66,66 @@ ${content}
 - NestJS projects: new features must create independent Modules; do not stuff logic into unrelated Modules
 </HARD-GATE>`;
 }
+
+/**
+ * Discover review-related slash commands and skills in the project.
+ * Scans .claude/commands/ for review-related files.
+ */
+function discoverReviewTools(cwd: string = process.cwd()): { commands: string[]; skills: string[] } {
+  const commands: string[] = [];
+  const skills: string[] = [];
+
+  // Scan .claude/commands/ for review-related slash commands
+  const commandsDir = path.join(cwd, '.claude', 'commands');
+  if (fs.existsSync(commandsDir)) {
+    try {
+      const files = fs.readdirSync(commandsDir);
+      for (const file of files) {
+        if (!file.endsWith('.md')) continue;
+        const name = file.replace('.md', '');
+        const lower = name.toLowerCase();
+        if (lower.includes('review') || lower.includes('simplify') || lower.includes('lint')
+          || lower.includes('audit') || lower.includes('check')) {
+          commands.push(`/${name}`);
+        }
+      }
+    } catch {
+      // ignore read errors
+    }
+  }
+
+  // Well-known review skills available in Claude Code
+  const knownReviewSkills = ['simplify', 'code-review'];
+  skills.push(...knownReviewSkills);
+
+  return { commands, skills };
+}
+
+/**
+ * Build auto-discovery block for review prompts when no agents/skills are provided.
+ */
+function buildReviewAutoDiscoveryBlock(cwd: string = process.cwd()): string {
+  const { commands, skills } = discoverReviewTools(cwd);
+
+  const parts: string[] = [];
+  parts.push('\n## Review Tool Instructions');
+  parts.push('You MUST perform a thorough code review. Do NOT just summarize the git diff.');
+  parts.push('Analyze the actual code changes for correctness, security, performance, and quality.');
+
+  if (commands.length > 0) {
+    parts.push(`\nAvailable project review commands: ${commands.join(', ')}`);
+    parts.push('Consider using these to assist the review.');
+  }
+
+  if (skills.length > 0) {
+    parts.push(`\nAvailable review skills: ${skills.map(s => `/${s}`).join(', ')}`);
+    parts.push('Use /simplify or /code-review if available to perform deeper analysis.');
+  }
+
+  return parts.join('\n');
+}
+
+const REVIEW_TEMPLATES = ['review', 'final-review'];
 
 /**
  * Assemble a full prompt from template name + variables + agents/skills + extra text.
@@ -87,9 +147,17 @@ export function assemblePrompt(opts: {
     prompt += archConstraint;
   }
 
-  const agentSkillBlock = buildAgentSkillBlock(opts.agents ?? [], opts.skills ?? []);
+  const agents = opts.agents ?? [];
+  const skills = opts.skills ?? [];
+
+  const agentSkillBlock = buildAgentSkillBlock(agents, skills);
   if (agentSkillBlock) {
     prompt += '\n' + agentSkillBlock;
+  }
+
+  // For review templates: inject auto-discovery when no agents/skills are provided
+  if (REVIEW_TEMPLATES.includes(opts.templateName) && agents.length === 0 && skills.length === 0) {
+    prompt += buildReviewAutoDiscoveryBlock(opts.cwd);
   }
 
   if (opts.extraText) {

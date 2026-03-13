@@ -35,6 +35,12 @@ const LANG_SHORTHANDS: Record<string, string> = {
   django: 'python-django',
   gin: 'go-gin',
   chi: 'go-chi',
+  flutter: 'dart-flutter',
+  dart: 'dart-flutter',
+  ios: 'swift-ios',
+  swift: 'swift-ios',
+  android: 'kotlin-android',
+  kotlin: 'kotlin-android',
 };
 
 export function resolveLangFramework(lang: string): string {

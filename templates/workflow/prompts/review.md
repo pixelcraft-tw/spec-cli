@@ -27,8 +27,7 @@ Label each issue with severity:
 
 Final verdict: PASS / NEEDS_CHANGES
 
-## Agent & Skill Auto-Discovery
-If no @agents or /skills were explicitly specified above, check for available code-review related agents and skills:
-1. Look for agents/skills in `.claude/agents/`, `.claude/skills/`, and installed plugins
-2. If any are relevant to code review (e.g., code-reviewer, security-auditor, simplify), invoke them to assist with the review
-3. Mention which agents/skills were used in the review output
+## IMPORTANT: Review Depth
+You MUST read and analyze the actual code — not just summarize file names or diff stats.
+For each changed file, review the implementation logic, not just the surface.
+If @agents or /skills are specified above, use them. Otherwise, perform the review yourself with full rigor.

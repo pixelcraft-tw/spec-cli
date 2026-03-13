@@ -13,6 +13,12 @@ describe('resolveLangFramework', () => {
     expect(resolveLangFramework('python')).toBe('python-fastapi');
     expect(resolveLangFramework('gin')).toBe('go-gin');
     expect(resolveLangFramework('nestjs')).toBe('typescript-nestjs');
+    expect(resolveLangFramework('flutter')).toBe('dart-flutter');
+    expect(resolveLangFramework('dart')).toBe('dart-flutter');
+    expect(resolveLangFramework('ios')).toBe('swift-ios');
+    expect(resolveLangFramework('swift')).toBe('swift-ios');
+    expect(resolveLangFramework('android')).toBe('kotlin-android');
+    expect(resolveLangFramework('kotlin')).toBe('kotlin-android');
   });
 
   it('passes through full lang_framework IDs unchanged', async () => {

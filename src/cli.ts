@@ -6,6 +6,8 @@ import { clarifyCommand } from './commands/clarify.js';
 import { implementCommand } from './commands/implement.js';
 import { reviewCommand } from './commands/review.js';
 import { statusCommand } from './commands/status.js';
+import { resetCommand } from './commands/reset.js';
+import { diffCommand } from './commands/diff.js';
 import { parseArgs } from './parsers/arguments.js';
 
 export function createProgram(): Command {
@@ -82,6 +84,21 @@ export function createProgram(): Command {
     .description('View workflow status')
     .action((name?: string) => {
       return statusCommand(name);
+    });
+
+  program
+    .command('reset <name>')
+    .description('Reset feature phase (unstick a feature)')
+    .option('--to <phase>', 'Target phase (default: spec_created)')
+    .action((name: string, options: { to?: string }) => {
+      return resetCommand(name, options);
+    });
+
+  program
+    .command('diff <name>')
+    .description('Show remaining tasks from the plan')
+    .action((name: string) => {
+      return diffCommand(name);
     });
 
   return program;
