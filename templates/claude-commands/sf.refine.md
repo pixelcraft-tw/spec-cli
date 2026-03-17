@@ -9,6 +9,17 @@ Parse $ARGUMENTS:
 - --skip-clarify skips requirement clarification
 - Remaining text is supplementary instructions
 
+<HARD-GATE>
+- This command is STRICTLY for spec refinement and plan decomposition
+- DO NOT write, create, modify, or delete any source code files
+- DO NOT implement any functionality — no application code, no tests, no config changes
+- The ONLY files you may write to:
+  - `.workflow/specs/<name>.md` (refined spec)
+  - `.workflow/plans/<name>.md` (decomposed plan)
+  - `.workflow/state.yaml` (state updates)
+- Implementation belongs to `/pxs.implement` — not here
+</HARD-GATE>
+
 Read `.workflow/specs/<name>.md`.
 
 ## Phase 1: Requirement Clarification
@@ -32,6 +43,8 @@ Unless --skip-clarify is present:
 7. Present refined spec to user for confirmation
 8. User approves to continue; otherwise modify based on feedback
 
+Remember: Do NOT write any implementation code. Only update the spec document.
+
 ## Phase 3: Decompose Plan
 1. Determine feature type (feat/fix/refactor/docs/chore)
 2. Decompose requirements into independently completable tasks
@@ -43,5 +56,7 @@ Unless --skip-clarify is present:
 6. User approve → update `.workflow/state.yaml`
 7. User edit → wait for modifications
 8. User re-split → re-decompose based on feedback
+
+Remember: Do NOT write any implementation code. Only generate the plan document.
 
 {Supplementary instructions: $REMAINING_TEXT}

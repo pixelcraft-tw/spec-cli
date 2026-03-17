@@ -1,6 +1,6 @@
 {
   "name": "@pixelcraft-tw/spec",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lightweight spec-driven development CLI",
   "type": "module",
   "license": "MIT",

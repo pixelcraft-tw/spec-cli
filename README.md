@@ -44,8 +44,6 @@ Initialize `.workflow/` directory and Claude Code slash commands for your projec
 | Option | Description |
 |--------|-------------|
 | `--force` | Overwrite existing `.workflow/` / 覆蓋現有目錄 |
-| `--arch <pattern>` | Architecture pattern: `clean` \| `hexagonal` \| `ddd` \| `layered` \| `modular` \| `custom` |
-| `--lang <lang>` | Language-framework override (e.g. `go`, `typescript`, `go-gin`) |
 
 ### `pxs new <name>`
 
@@ -168,14 +166,14 @@ After `pxs init`, the following slash commands are available in Claude Code:
 
 | Slash Command | Description |
 |---------------|-------------|
-| `/pxs:new` | Create a new spec / 建立規格 |
-| `/pxs:refine` | Refine spec into plan / 拆解計畫 |
-| `/pxs:clarify` | Clarify requirements / 釐清需求 |
-| `/pxs:implement` | Implement task by task / 逐步實作 |
-| `/pxs:review` | View reviews / 查看 review |
-| `/pxs:status` | Check status / 查看狀態 |
-| `/pxs:reset` | Reset feature phase / 重置 feature 狀態 |
-| `/pxs:diff` | Show task progress / 查看 task 進度 |
+| `/pxs.new` | Create a new spec / 建立規格 |
+| `/pxs.refine` | Refine spec into plan / 拆解計畫 |
+| `/pxs.clarify` | Clarify requirements / 釐清需求 |
+| `/pxs.implement` | Implement task by task / 逐步實作 |
+| `/pxs.review` | View reviews / 查看 review |
+| `/pxs.status` | Check status / 查看狀態 |
+| `/pxs.reset` | Reset feature phase / 重置 feature 狀態 |
+| `/pxs.diff` | Show task progress / 查看 task 進度 |
 
 ## Project Structure / 專案結構
 
@@ -183,7 +181,6 @@ After `pxs init`, the following slash commands are available in Claude Code:
 .workflow/
 ├── state.yaml          # Workflow state / 工作流狀態
 ├── config.yaml         # Project config / 專案設定
-├── architecture.md     # Architecture constraints (if --arch) / 架構約束
 ├── specs/              # Feature specs / 功能規格
 ├── plans/              # Implementation plans / 實作計畫
 ├── reviews/            # AI review records / AI review 紀錄

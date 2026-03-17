@@ -25,7 +25,7 @@ npm test         # vitest
 ## Conventions
 
 - Package: `@pixelcraft-tw/spec`, binary: `pxs`
-- Slash commands use `pxs.*` naming (e.g., `/pxs:refine`)
+- Slash commands use `pxs.*` naming (e.g., `/pxs.refine`)
 - Zero API dependency — only spawns CLI subprocesses (claude, codex)
 - State stored in `.workflow/state.yaml` (YAML)
 - Prompt templates in `.workflow/prompts/`
