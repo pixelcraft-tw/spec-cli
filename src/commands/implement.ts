@@ -5,13 +5,14 @@ import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
 import { parsePlan } from '../parsers/plan.js';
 import { assemblePrompt } from '../utils/prompt.js';
+import { runExpertReview, loadDocs } from '../utils/review.js';
 import { gitBranch, gitCommit, gitDiff, gitDiffBranch, gitCheckout, gitMerge, gitCurrentBranch } from '../git/operations.js';
 import * as display from '../utils/display.js';
 
 export async function implementCommand(
   name: string,
   args: { agents: string[]; skills: string[]; text: string },
-  options: { backend?: string; test?: string[] | boolean; skipReview?: boolean }
+  options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[] }
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -56,6 +57,7 @@ export async function implementCommand(
   // Determine test strategy
   const testConfig = parseTestOptions(options.test);
   const baseBranch = feature.base_branch || 'main';
+  const docsContent = loadDocs(options.docs);
   let sessionId = feature.session?.id ?? '';
 
   // Ensure reviews dir exists once
@@ -131,29 +133,31 @@ export async function implementCommand(
       }
     }
 
-    // AI Review
-    display.info('Running AI review...');
-    const reviewPrompt = assemblePrompt({
+    // Independent AI review — runs in a FRESH session (not the implementer's),
+    // so the reviewer is not grading its own work. Its session is discarded and
+    // must not overwrite `sessionId`, which keeps the implementer context for the
+    // next task.
+    display.info('Running independent AI review...');
+    const reviewOutput = await runExpertReview({
+      backend,
       templateName: 'review',
       vars: {
         git_diff: taskDiff,
         task_content: taskSpec.raw,
+        docs_content: docsContent,
       },
       agents: args.agents,
       skills: args.skills,
     });
 
-    const reviewResult = await backend.resume(sessionId, reviewPrompt);
-    sessionId = reviewResult.sessionId;
-
     // Save review
-    fs.writeFileSync(state.reviewPath(name, i + 1), reviewResult.output, 'utf-8');
+    fs.writeFileSync(state.reviewPath(name, i + 1), reviewOutput, 'utf-8');
 
     task.status = 'review_pending';
     state.upsertFeature(feature);
 
     // Present to user
-    console.log('\n' + reviewResult.output + '\n');
+    console.log('\n' + reviewOutput + '\n');
 
     const { choice } = await inquirer.prompt([
       {
@@ -199,36 +203,37 @@ export async function implementCommand(
       console.log(`  ${display.taskIcon(t.status)} ${t.name}`);
     }
 
-    // Final branch code review
+    // Final branch code review — independent expert that verifies the whole
+    // branch against the spec and any developer-provided documents. Runs in a
+    // fresh session (not the implementer's) to avoid self-review bias.
     if (!options.skipReview) {
-      display.info('Running final branch code review...');
+      display.info('Running independent final review (spec & document conformance)...');
       try {
         const branchDiff = gitDiffBranch(baseBranch);
         const specContent = fs.existsSync(state.specPath(name))
           ? fs.readFileSync(state.specPath(name), 'utf-8')
           : '(spec not found)';
 
-        const finalReviewPrompt = assemblePrompt({
+        const finalReviewOutput = await runExpertReview({
+          backend,
           templateName: 'final-review',
           vars: {
             branch_diff: branchDiff,
             spec_content: specContent,
             plan_content: planContent,
+            docs_content: docsContent,
           },
           agents: args.agents,
           skills: args.skills,
           extraText: args.text,
         });
 
-        const finalReviewResult = await backend.resume(sessionId, finalReviewPrompt);
-        sessionId = finalReviewResult.sessionId;
-
         // Save final review
         const finalReviewPath = path.join(state.reviewsDir(), `${name}-final.md`);
-        fs.writeFileSync(finalReviewPath, finalReviewResult.output, 'utf-8');
+        fs.writeFileSync(finalReviewPath, finalReviewOutput, 'utf-8');
 
         display.heading('Final Code Review');
-        console.log('\n' + finalReviewResult.output + '\n');
+        console.log('\n' + finalReviewOutput + '\n');
       } catch (err) {
         display.warn(`Final review failed: ${err instanceof Error ? err.message : err}`);
       }

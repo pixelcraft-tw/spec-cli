@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
@@ -10,13 +13,16 @@ import { resetCommand } from './commands/reset.js';
 import { diffCommand } from './commands/diff.js';
 import { parseArgs } from './parsers/arguments.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf-8'));
+
 export function createProgram(): Command {
   const program = new Command();
 
   program
     .name('pxs')
     .description('Spec-driven development CLI')
-    .version('1.0.0');
+    .version(pkg.version);
 
   program
     .command('init')
@@ -62,8 +68,9 @@ export function createProgram(): Command {
     .option('--backend <name>', 'AI backend (claude | codex)')
     .option('--test [types...]', 'Test strategy')
     .option('--skip-review', 'Skip final branch code review')
+    .option('--docs <paths...>', 'Reference documents fed to the reviewer (put last)')
     .allowUnknownOption()
-    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean }, cmd: Command) => {
+    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[] }, cmd: Command) => {
       const rawArgs = cmd.args ?? [];
       const parsed = parseArgs(rawArgs);
       return implementCommand(name, parsed, options);
@@ -71,11 +78,14 @@ export function createProgram(): Command {
 
   program
     .command('review <name>')
-    .description('View review records')
+    .description('View review records, or re-run an independent expert review with --run')
     .option('--step <n>', 'View specific task review', parseInt)
     .option('--summary', 'Summary overview of all tasks')
+    .option('--run', 'Re-run an independent expert review (spec & document conformance) now')
+    .option('--backend <name>', 'AI backend for --run (claude | codex)')
+    .option('--docs <paths...>', 'Reference documents fed to the reviewer (put last)')
     .allowUnknownOption()
-    .action((name: string, options: { step?: number; summary?: boolean }) => {
+    .action((name: string, options: { step?: number; summary?: boolean; run?: boolean; backend?: string; docs?: string[] }) => {
       return reviewCommand(name, options);
     });
 

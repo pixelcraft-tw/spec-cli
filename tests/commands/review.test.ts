@@ -1,8 +1,25 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { StateManager } from '../../src/state/manager.js';
+
+// Mock git operations (only used by the --run path)
+vi.mock('../../src/git/operations.js', () => ({
+  gitDiffBranch: vi.fn().mockReturnValue('branch diff'),
+}));
+
+// Mock backend
+const mockBackend = {
+  name: 'claude',
+  isAvailable: vi.fn().mockResolvedValue(true),
+  execute: vi.fn().mockResolvedValue({ output: '## Final Review\nPASS', sessionId: 'rev-1', exitCode: 0 }),
+  resume: vi.fn(),
+};
+
+vi.mock('../../src/backends/factory.js', () => ({
+  createBackend: () => mockBackend,
+}));
 
 describe('pxs review', () => {
   let tmpDir: string;
@@ -108,5 +125,27 @@ describe('pxs review', () => {
 
     const { reviewCommand } = await import('../../src/commands/review.js');
     await expect(reviewCommand('early', {})).rejects.toThrow(/cannot run in phase/i);
+  });
+
+  it('--run executes an independent expert review and saves it', async () => {
+    mockBackend.execute.mockClear();
+    mockBackend.resume.mockClear();
+    fs.mkdirSync(path.join(tmpDir, '.workflow', 'prompts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.workflow', 'prompts', 'final-review.md'),
+      'Final review:\n{branch_diff}\n{spec_content}\n{plan_content}\n{docs_content}'
+    );
+    seedFeature('completed', [{ name: 'task-1', status: 'complete' }]);
+
+    const { reviewCommand } = await import('../../src/commands/review.js');
+    await reviewCommand('my-feat', { run: true });
+
+    // Independent reviewer must use a fresh session (execute), never resume
+    expect(mockBackend.execute).toHaveBeenCalledTimes(1);
+    expect(mockBackend.resume).not.toHaveBeenCalled();
+
+    const finalReviewPath = path.join(tmpDir, '.workflow', 'reviews', 'my-feat-final.md');
+    expect(fs.existsSync(finalReviewPath)).toBe(true);
+    expect(fs.readFileSync(finalReviewPath, 'utf-8')).toContain('PASS');
   });
 });

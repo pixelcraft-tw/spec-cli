@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { StateManager } from '../state/manager.js';
+import { createBackend } from '../backends/factory.js';
+import { runExpertReview, loadDocs } from '../utils/review.js';
+import { gitDiffBranch } from '../git/operations.js';
 import * as display from '../utils/display.js';
 
 export async function reviewCommand(
   name: string,
-  options: { step?: number; summary?: boolean }
+  options: { step?: number; summary?: boolean; run?: boolean; backend?: string; docs?: string[] }
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -14,6 +17,45 @@ export async function reviewCommand(
   const feature = state.getFeature(name);
   if (!feature) {
     display.error(`Feature "${name}" not found.`);
+    return;
+  }
+
+  // Re-run an independent expert review on demand (no re-implementation).
+  if (options.run) {
+    const config = state.readConfig();
+    const backendName = options.backend ?? config.backend.default;
+    const backend = createBackend(backendName);
+    if (!(await backend.isAvailable())) {
+      display.error(`Backend "${backendName}" not available.`);
+      return;
+    }
+
+    const baseBranch = feature.base_branch || 'main';
+    const specContent = fs.existsSync(state.specPath(name))
+      ? fs.readFileSync(state.specPath(name), 'utf-8')
+      : '(spec not found)';
+    const planContent = fs.existsSync(state.planPath(name))
+      ? fs.readFileSync(state.planPath(name), 'utf-8')
+      : '(plan not found)';
+
+    display.info('Running independent expert review (spec & document conformance)...');
+    const output = await runExpertReview({
+      backend,
+      templateName: 'final-review',
+      vars: {
+        branch_diff: gitDiffBranch(baseBranch),
+        spec_content: specContent,
+        plan_content: planContent,
+        docs_content: loadDocs(options.docs),
+      },
+    });
+
+    fs.mkdirSync(state.reviewsDir(), { recursive: true });
+    const finalReviewPath = path.join(state.reviewsDir(), `${name}-final.md`);
+    fs.writeFileSync(finalReviewPath, output, 'utf-8');
+
+    display.heading(`Independent Review: ${name}`);
+    console.log('\n' + output + '\n');
     return;
   }
 

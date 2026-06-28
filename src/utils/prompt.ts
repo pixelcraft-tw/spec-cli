@@ -109,17 +109,19 @@ function buildReviewAutoDiscoveryBlock(cwd: string = process.cwd()): string {
 
   const parts: string[] = [];
   parts.push('\n## Review Tool Instructions');
+  parts.push('You are an INDEPENDENT reviewer. You did NOT write this code — do not assume it is correct.');
   parts.push('You MUST perform a thorough code review. Do NOT just summarize the git diff.');
-  parts.push('Analyze the actual code changes for correctness, security, performance, and quality.');
+  parts.push('Open and read the ACTUAL changed files in the repository; analyze the real logic for correctness, security, performance, and quality.');
+  parts.push('If a `/code-review` skill or a `code-reviewer` agent is available, INVOKE IT to perform the deep review, then incorporate its findings into your verdict.');
 
   if (commands.length > 0) {
     parts.push(`\nAvailable project review commands: ${commands.join(', ')}`);
-    parts.push('Consider using these to assist the review.');
+    parts.push('Use these to assist the review.');
   }
 
   if (skills.length > 0) {
     parts.push(`\nAvailable review skills: ${skills.map(s => `/${s}`).join(', ')}`);
-    parts.push('Use /simplify or /code-review if available to perform deeper analysis.');
+    parts.push('Invoke /code-review (and /simplify) to perform deeper analysis when available.');
   }
 
   return parts.join('\n');
@@ -155,8 +157,10 @@ export function assemblePrompt(opts: {
     prompt += '\n' + agentSkillBlock;
   }
 
-  // For review templates: inject auto-discovery when no agents/skills are provided
-  if (REVIEW_TEMPLATES.includes(opts.templateName) && agents.length === 0 && skills.length === 0) {
+  // For review templates: always reinforce independent-reviewer framing and
+  // surface available review tooling (/code-review, code-reviewer agent, etc.),
+  // even when explicit agents/skills were also requested.
+  if (REVIEW_TEMPLATES.includes(opts.templateName)) {
     prompt += buildReviewAutoDiscoveryBlock(opts.cwd);
   }
 
