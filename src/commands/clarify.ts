@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
+import { runPrompt } from '../backends/run.js';
 import { assemblePrompt } from '../utils/prompt.js';
 import * as display from '../utils/display.js';
 
@@ -38,12 +39,7 @@ export async function clarifyCommand(
   });
 
   const feature = state.getFeature(name);
-  let result;
-  if (feature?.session?.id) {
-    result = await backend.resume(feature.session.id, prompt);
-  } else {
-    result = await backend.execute(prompt);
-  }
+  const result = await runPrompt(backend, prompt, { sessionId: feature?.session?.id });
 
   console.log('\n' + result.output);
 

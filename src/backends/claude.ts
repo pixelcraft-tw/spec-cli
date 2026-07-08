@@ -44,12 +44,14 @@ export class ClaudeBackend implements AIBackend {
         stderr += data.toString();
       });
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         const result = this._parseStreamJson(stdout);
         resolve({
           output: result.output,
           sessionId: result.sessionId,
           exitCode: code ?? 1,
+          stderr,
+          signal,
         });
       });
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import inquirer from 'inquirer';
 import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
+import { runPrompt } from '../backends/run.js';
 import { assemblePrompt } from '../utils/prompt.js';
 import { parsePlan } from '../parsers/plan.js';
 import * as display from '../utils/display.js';
@@ -45,9 +46,9 @@ export async function refineCommand(
       extraText: args.text,
     });
 
-    const clarifyResult = sessionId
-      ? await backend.resume(sessionId, clarifyPrompt)
-      : await backend.execute(clarifyPrompt);
+    const clarifyResult = await runPrompt(backend, clarifyPrompt, {
+      sessionId: sessionId || undefined,
+    });
 
     sessionId = clarifyResult.sessionId;
     console.log('\n' + clarifyResult.output);
@@ -84,9 +85,9 @@ export async function refineCommand(
     extraText: args.text,
   });
 
-  const refineResult = sessionId
-    ? await backend.resume(sessionId, refinePrompt)
-    : await backend.execute(refinePrompt);
+  const refineResult = await runPrompt(backend, refinePrompt, {
+    sessionId: sessionId || undefined,
+  });
 
   sessionId = refineResult.sessionId;
 
@@ -138,9 +139,9 @@ Output the plan in this exact format:
 
 (repeat for each task)`;
 
-  const planResult = sessionId
-    ? await backend.resume(sessionId, planPrompt)
-    : await backend.execute(planPrompt);
+  const planResult = await runPrompt(backend, planPrompt, {
+    sessionId: sessionId || undefined,
+  });
 
   sessionId = planResult.sessionId;
 

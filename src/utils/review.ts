@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import type { AIBackend } from '../backends/interface.js';
+import { runPrompt } from '../backends/run.js';
 import { assemblePrompt } from './prompt.js';
 
 /**
@@ -48,6 +49,6 @@ export async function runExpertReview(opts: {
     extraText: opts.extraText,
   });
 
-  const result = await opts.backend.execute(prompt);
+  const result = await runPrompt(opts.backend, prompt);
   return result.output;
 }

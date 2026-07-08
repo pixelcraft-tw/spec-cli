@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import inquirer from 'inquirer';
 import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
+import { runPrompt } from '../backends/run.js';
 import * as display from '../utils/display.js';
 
 export async function newCommand(
@@ -118,10 +119,10 @@ Output format:
 ## Notes
 (Additional notes)`;
 
-    const result = await backend.execute(prompt);
+    const result = await runPrompt(backend, prompt);
     fs.writeFileSync(state.specPath(name), result.output, 'utf-8');
   } catch (err) {
-    display.warn(`AI generation failed: ${err}. Creating blank spec.`);
+    display.warn(`AI generation failed: ${err instanceof Error ? err.message : err}. Creating blank spec.`);
     createBlank(name, state);
   }
 }
@@ -169,11 +170,11 @@ ${ticketList}
 
 If you cannot access Jira MCP, output the spec template with the ticket IDs listed so the user can fill in details manually.`;
 
-    const result = await backend.execute(prompt);
+    const result = await runPrompt(backend, prompt);
     fs.writeFileSync(state.specPath(name), result.output, 'utf-8');
     display.success(`Generated spec from ${tickets.length} Jira ticket(s).`);
   } catch (err) {
-    display.warn(`Jira integration failed: ${err}. Creating blank spec.`);
+    display.warn(`Jira integration failed: ${err instanceof Error ? err.message : err}. Creating blank spec.`);
     createBlank(name, state);
   }
 }
