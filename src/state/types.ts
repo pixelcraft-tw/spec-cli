@@ -31,6 +31,13 @@ export interface SessionInfo {
   id: string;
 }
 
+/** Accumulated AI usage across all backend runs for a feature. */
+export interface UsageInfo {
+  cost_usd: number;
+  duration_ms: number;
+  runs: number;
+}
+
 export interface FeatureState {
   feature: string;
   type: FeatureType;
@@ -40,6 +47,7 @@ export interface FeatureState {
   total_tasks: number;
   current_task: number;
   session?: SessionInfo;
+  usage?: UsageInfo;
   tasks: TaskState[];
 }
 

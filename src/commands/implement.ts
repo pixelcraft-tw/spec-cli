@@ -27,7 +27,13 @@ import type { FeatureState } from '../state/types.js';
 export async function implementCommand(
   name: string,
   args: { agents: string[]; skills: string[]; text: string },
-  options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[] }
+  options: {
+    backend?: string;
+    test?: string[] | boolean;
+    skipReview?: boolean;
+    docs?: string[];
+    yes?: boolean;
+  }
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -37,10 +43,15 @@ export async function implementCommand(
   const config = state.readConfig();
   const backendName = options.backend ?? config.backend.default;
   const backend = createBackend(backendName);
+  const autoYes = options.yes === true;
 
   if (!(await backend.isAvailable())) {
     display.error(`Backend "${backendName}" not available.`);
     return;
+  }
+
+  if (!autoYes && !process.stdout.isTTY) {
+    display.warn('Not running in a TTY — interactive prompts may fail. Use --yes for non-interactive runs.');
   }
 
   // Read plan
@@ -73,6 +84,8 @@ export async function implementCommand(
   const testConfig = parseTestOptions(options.test);
   const baseBranch = feature.base_branch || 'main';
   const docsContent = loadDocs(options.docs);
+  const onEvent = display.renderBackendEvent;
+  const logsDir = state.logsDir();
   let sessionId = feature.session?.id ?? '';
 
   // Ensure reviews dir exists once
@@ -131,10 +144,15 @@ export async function implementCommand(
 
       // Execute — a failed CLI run (auth, quota, timeout) throws here.
       // State is resumable: status in_progress + anchor are already persisted.
-      const result = await runPrompt(backend, prompt, { sessionId: sessionId || undefined });
+      const result = await runPrompt(backend, prompt, {
+        sessionId: sessionId || undefined,
+        onEvent,
+        log: { dir: logsDir, label: `${name}-task-${i + 1}-implement` },
+      });
       sessionId = result.sessionId;
       feature.session = { backend: backendName, id: sessionId };
       state.upsertFeature(feature);
+      state.recordUsage(feature, result);
 
       commitAll(commitMessage);
     }
@@ -146,6 +164,11 @@ export async function implementCommand(
     // Reviewing here would grade a stale/empty diff — ask the user instead.
     if (needImplementation && !taskDiff.trim()) {
       display.warn('The backend made no code changes for this task.');
+      if (autoYes) {
+        // Non-interactive runs must fail loudly, not guess
+        display.error('Aborting (--yes): a no-change task needs human review. Re-run interactively.');
+        return;
+      }
       const { choice } = await inquirer.prompt([
         {
           type: 'list',
@@ -176,10 +199,13 @@ export async function implementCommand(
         backend, sessionId, testConfig, taskDiff,
         taskRaw: taskSpec.raw,
         commitMessage: `test(${name}): task-${i + 1} ${task.name}`,
+        onEvent,
+        log: { dir: logsDir, label: `${name}-task-${i + 1}-test` },
       });
       sessionId = testResult.sessionId;
       feature.session = { backend: backendName, id: sessionId };
       state.upsertFeature(feature);
+      state.recordUsage(feature, testResult);
       taskDiff = safeDiff(anchor);
     }
 
@@ -191,7 +217,7 @@ export async function implementCommand(
       // must not overwrite `sessionId`, which keeps the implementer context for the
       // next task.
       display.info('Running independent AI review...');
-      const reviewOutput = await runExpertReview({
+      const review = await runExpertReview({
         backend,
         templateName: 'review',
         vars: {
@@ -201,7 +227,10 @@ export async function implementCommand(
         },
         agents: args.agents,
         skills: args.skills,
+        log: { dir: logsDir, label: `${name}-task-${i + 1}-review` },
       });
+      state.recordUsage(feature, review);
+      const reviewOutput = review.output;
 
       // Save review
       fs.writeFileSync(state.reviewPath(name, i + 1), reviewOutput, 'utf-8');
@@ -212,14 +241,20 @@ export async function implementCommand(
       // Present to user
       console.log('\n' + reviewOutput + '\n');
 
-      const { choice } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'choice',
-          message: `Task ${i + 1} review:`,
-          choices: ['approve', 'request-change', 'add-test', 'skip'],
-        },
-      ]);
+      let choice: string;
+      if (autoYes) {
+        display.info('--yes: auto-approving task.');
+        choice = 'approve';
+      } else {
+        ({ choice } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'choice',
+            message: `Task ${i + 1} review:`,
+            choices: ['approve', 'request-change', 'add-test', 'skip'],
+          },
+        ]));
+      }
 
       switch (choice) {
         case 'approve':
@@ -242,10 +277,13 @@ export async function implementCommand(
             backend, sessionId, testConfig, taskDiff,
             taskRaw: taskSpec.raw,
             commitMessage: `test(${name}): task-${i + 1} ${task.name}`,
+            onEvent,
+            log: { dir: logsDir, label: `${name}-task-${i + 1}-add-test` },
           });
           sessionId = result.sessionId;
           feature.session = { backend: backendName, id: sessionId };
           state.upsertFeature(feature);
+          state.recordUsage(feature, result);
           taskDiff = safeDiff(anchor);
           continue reviewLoop;
         }
@@ -293,10 +331,15 @@ export async function implementCommand(
               extraText: args.text,
             }) + revertedAttemptBlock(discardedStat, feedback);
 
-          const result = await runPrompt(backend, redoPrompt, { sessionId: sessionId || undefined });
+          const result = await runPrompt(backend, redoPrompt, {
+            sessionId: sessionId || undefined,
+            onEvent,
+            log: { dir: logsDir, label: `${name}-task-${i + 1}-redo` },
+          });
           sessionId = result.sessionId;
           feature.session = { backend: backendName, id: sessionId };
           state.upsertFeature(feature);
+          state.recordUsage(feature, result);
 
           commitAll(commitMessage);
           taskDiff = safeDiff(anchor);
@@ -331,7 +374,7 @@ export async function implementCommand(
           ? fs.readFileSync(state.specPath(name), 'utf-8')
           : '(spec not found)';
 
-        const finalReviewOutput = await runExpertReview({
+        const finalReview = await runExpertReview({
           backend,
           templateName: 'final-review',
           vars: {
@@ -343,27 +386,43 @@ export async function implementCommand(
           agents: args.agents,
           skills: args.skills,
           extraText: args.text,
+          log: { dir: logsDir, label: `${name}-final-review` },
         });
+        state.recordUsage(feature, finalReview);
 
         // Save final review
         const finalReviewPath = path.join(state.reviewsDir(), `${name}-final.md`);
-        fs.writeFileSync(finalReviewPath, finalReviewOutput, 'utf-8');
+        fs.writeFileSync(finalReviewPath, finalReview.output, 'utf-8');
 
         display.heading('Final Code Review');
-        console.log('\n' + finalReviewOutput + '\n');
+        console.log('\n' + finalReview.output + '\n');
       } catch (err) {
         display.warn(`Final review failed: ${err instanceof Error ? err.message : err}`);
       }
     }
 
-    const { merge } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'merge',
-        message: 'What would you like to do?',
-        choices: ['merge', 'squash-merge', 'keep-branch'],
-      },
-    ]);
+    if (feature.usage) {
+      display.info(
+        `Total AI usage: $${feature.usage.cost_usd.toFixed(4)} · ` +
+        `${display.formatDuration(feature.usage.duration_ms)} · ${feature.usage.runs} runs`
+      );
+    }
+
+    let merge: string;
+    if (autoYes) {
+      // Merging is destructive — never auto-merge in non-interactive mode
+      display.info('--yes: keeping branch. Merge manually when ready.');
+      merge = 'keep-branch';
+    } else {
+      ({ merge } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'merge',
+          message: 'What would you like to do?',
+          choices: ['merge', 'squash-merge', 'keep-branch'],
+        },
+      ]));
+    }
 
     if (merge === 'merge' || merge === 'squash-merge') {
       gitCheckout(baseBranch);
@@ -441,7 +500,9 @@ async function generateTests(opts: {
   taskDiff: string;
   taskRaw: string;
   commitMessage: string;
-}): Promise<{ sessionId: string }> {
+  onEvent?: (event: Record<string, unknown>) => void;
+  log?: { dir: string; label: string };
+}): Promise<{ sessionId: string; costUsd?: number; durationMs?: number }> {
   const testType = opts.testConfig.intg ? 'integration' : 'unit';
   const testPrompt = assemblePrompt({
     templateName: 'test',
@@ -454,9 +515,11 @@ async function generateTests(opts: {
 
   const result = await runPrompt(opts.backend, testPrompt, {
     sessionId: opts.sessionId || undefined,
+    onEvent: opts.onEvent,
+    log: opts.log,
   });
   commitAll(opts.commitMessage);
-  return { sessionId: result.sessionId };
+  return { sessionId: result.sessionId, costUsd: result.costUsd, durationMs: result.durationMs };
 }
 
 /**

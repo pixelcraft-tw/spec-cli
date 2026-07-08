@@ -48,7 +48,10 @@ export async function refineCommand(
 
     const clarifyResult = await runPrompt(backend, clarifyPrompt, {
       sessionId: sessionId || undefined,
+      onEvent: display.renderBackendEvent,
+      log: { dir: state.logsDir(), label: `${name}-refine-clarify` },
     });
+    state.recordUsage(feature, clarifyResult);
 
     sessionId = clarifyResult.sessionId;
     console.log('\n' + clarifyResult.output);
@@ -87,7 +90,10 @@ export async function refineCommand(
 
   const refineResult = await runPrompt(backend, refinePrompt, {
     sessionId: sessionId || undefined,
+    onEvent: display.renderBackendEvent,
+    log: { dir: state.logsDir(), label: `${name}-refine-spec` },
   });
+  state.recordUsage(feature, refineResult);
 
   sessionId = refineResult.sessionId;
 
@@ -141,7 +147,10 @@ Output the plan in this exact format:
 
   const planResult = await runPrompt(backend, planPrompt, {
     sessionId: sessionId || undefined,
+    onEvent: display.renderBackendEvent,
+    log: { dir: state.logsDir(), label: `${name}-refine-plan` },
   });
+  state.recordUsage(feature, planResult);
 
   sessionId = planResult.sessionId;
 

@@ -69,6 +69,17 @@ export class StateManager {
     this.writeState(state);
   }
 
+  /** Accumulate AI usage (cost/duration) onto a feature and persist it. */
+  recordUsage(feature: FeatureState, usage: { costUsd?: number; durationMs?: number }): void {
+    if (usage.costUsd === undefined && usage.durationMs === undefined) return;
+    feature.usage = {
+      cost_usd: (feature.usage?.cost_usd ?? 0) + (usage.costUsd ?? 0),
+      duration_ms: (feature.usage?.duration_ms ?? 0) + (usage.durationMs ?? 0),
+      runs: (feature.usage?.runs ?? 0) + 1,
+    };
+    this.upsertFeature(feature);
+  }
+
   checkPhaseGuard(command: string, featureName: string): void {
     const allowedPhases = PHASE_GUARDS[command];
     if (!allowedPhases || allowedPhases.length === 0) return; // any phase allowed
@@ -109,6 +120,10 @@ export class StateManager {
 
   promptsDir(): string {
     return path.join(this.workflowDir, 'prompts');
+  }
+
+  logsDir(): string {
+    return path.join(this.workflowDir, 'logs');
   }
 
   templatesDir(): string {

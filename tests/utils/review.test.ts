@@ -69,7 +69,7 @@ describe('runExpertReview', () => {
       vars: { git_diff: 'diff' },
     });
 
-    expect(out).toBe('verdict: PASS');
+    expect(out.output).toBe('verdict: PASS');
     expect(backend.execute).toHaveBeenCalledTimes(1);
     expect(backend.resume).not.toHaveBeenCalled();
   });

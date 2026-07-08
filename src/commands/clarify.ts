@@ -39,7 +39,14 @@ export async function clarifyCommand(
   });
 
   const feature = state.getFeature(name);
-  const result = await runPrompt(backend, prompt, { sessionId: feature?.session?.id });
+  const result = await runPrompt(backend, prompt, {
+    sessionId: feature?.session?.id,
+    onEvent: display.renderBackendEvent,
+    log: { dir: state.logsDir(), label: `${name}-clarify` },
+  });
+  if (feature) {
+    state.recordUsage(feature, result);
+  }
 
   console.log('\n' + result.output);
 

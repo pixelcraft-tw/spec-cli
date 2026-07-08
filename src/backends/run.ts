@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
 const STDERR_TAIL_LINES = 20;
@@ -23,23 +25,34 @@ export class BackendExecutionError extends Error {
   }
 }
 
+/** Where to persist a run's raw output for later debugging. */
+export interface RunLogTarget {
+  dir: string;
+  label: string;
+}
+
 /**
  * Execute (or resume) a prompt against a backend and enforce success.
  *
  * Backends are transport-only: they always resolve with the full process
  * result. This is the single place that turns a failed run into an error,
  * so no caller can accidentally treat an empty output from a crashed CLI
- * as a successful response.
+ * as a successful response. When a log target is given, the raw event
+ * stream is persisted (spec §10.2) — especially on failure.
  */
 export async function runPrompt(
   backend: AIBackend,
   prompt: string,
-  opts?: ExecuteOptions & { sessionId?: string }
+  opts?: ExecuteOptions & { sessionId?: string; log?: RunLogTarget }
 ): Promise<ExecuteResult> {
-  const { sessionId, ...execOpts } = opts ?? {};
+  const { sessionId, log, ...execOpts } = opts ?? {};
   const result = sessionId
     ? await backend.resume(sessionId, prompt, execOpts)
     : await backend.execute(prompt, execOpts);
+
+  if (log) {
+    writeRunLog(log, result);
+  }
 
   if ((result.exitCode ?? 0) !== 0) {
     const tail = (result.stderr ?? '')
@@ -51,4 +64,19 @@ export async function runPrompt(
   }
 
   return result;
+}
+
+/** Best-effort raw-output logging — must never break the run itself. */
+function writeRunLog(log: RunLogTarget, result: ExecuteResult): void {
+  try {
+    fs.mkdirSync(log.dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = path.join(log.dir, `${ts}-${log.label}`);
+    fs.writeFileSync(`${base}.jsonl`, result.raw ?? result.output ?? '', 'utf-8');
+    if (result.stderr?.trim()) {
+      fs.writeFileSync(`${base}.stderr.log`, result.stderr, 'utf-8');
+    }
+  } catch {
+    // ignore logging failures
+  }
 }

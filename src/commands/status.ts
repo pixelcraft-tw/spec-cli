@@ -20,7 +20,7 @@ export async function statusCommand(name?: string): Promise<void> {
 
     display.heading('Workflow Status');
     display.table(
-      ['Feature', 'Type', 'Phase', 'Tasks', 'Branch'],
+      ['Feature', 'Type', 'Phase', 'Tasks', 'Branch', 'Cost'],
       workflowState.features.map((f) => {
         const completedTasks = f.tasks.filter((t) => t.status === 'complete').length;
         return [
@@ -29,6 +29,7 @@ export async function statusCommand(name?: string): Promise<void> {
           f.phase,
           `${completedTasks}/${f.total_tasks}`,
           f.branch || '-',
+          f.usage ? `$${f.usage.cost_usd.toFixed(2)}` : '-',
         ];
       })
     );
@@ -47,6 +48,12 @@ export async function statusCommand(name?: string): Promise<void> {
     if (feature.session) {
       console.log(`  Backend: ${feature.session.backend}`);
       console.log(`  Session: ${feature.session.id}`);
+    }
+    if (feature.usage) {
+      console.log(
+        `  Usage:   $${feature.usage.cost_usd.toFixed(4)} · ` +
+        `${display.formatDuration(feature.usage.duration_ms)} · ${feature.usage.runs} AI runs`
+      );
     }
 
     if (feature.tasks.length > 0) {

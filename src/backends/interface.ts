@@ -1,6 +1,11 @@
 export interface ExecuteOptions {
   cwd?: string;
   timeout?: number;
+  /**
+   * Called for every parsed JSON event as it streams from the CLI, so long
+   * runs show live progress instead of minutes of silence.
+   */
+  onEvent?: (event: Record<string, unknown>) => void;
 }
 
 export interface ExecuteResult {
@@ -9,8 +14,14 @@ export interface ExecuteResult {
   exitCode: number;
   /** Raw stderr from the CLI process — surfaced in errors, never silently dropped. */
   stderr: string;
+  /** Raw stdout (the full event stream) — persisted to .workflow/logs/ for debugging. */
+  raw: string;
   /** Signal that killed the process (e.g. SIGTERM on timeout), if any. */
   signal?: string | null;
+  /** Usage metadata from the CLI's result event, when available. */
+  costUsd?: number;
+  durationMs?: number;
+  numTurns?: number;
 }
 
 export interface AIBackend {

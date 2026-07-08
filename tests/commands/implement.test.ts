@@ -46,6 +46,9 @@ const okResult = (output: string, sessionId: string) => ({
   sessionId,
   exitCode: 0,
   stderr: '',
+  raw: output,
+  costUsd: 0.05,
+  durationMs: 1200,
 });
 
 describe('pxs implement', () => {
@@ -329,6 +332,36 @@ describe('pxs implement', () => {
 
     const mgr = new StateManager(tmpDir);
     expect(mgr.getFeature('redo-test')!.tasks[0].status).toBe('complete');
+  });
+
+  it('--yes runs non-interactively: auto-approve, no prompts, branch kept', async () => {
+    seedReady('yes-test');
+    vi.mocked(inquirer.prompt).mockRejectedValue(new Error('must not prompt in --yes mode'));
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('yes-test', { agents: [], skills: [], text: '' }, { yes: true });
+
+    expect(inquirer.prompt).not.toHaveBeenCalled();
+    expect(git.gitMerge).not.toHaveBeenCalled();
+
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('yes-test')!;
+    expect(feature.tasks[0].status).toBe('complete');
+    expect(feature.phase).toBe('completed');
+  });
+
+  it('accumulates AI cost and duration onto the feature', async () => {
+    seedReady('usage-test');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('usage-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    const mgr = new StateManager(tmpDir);
+    const usage = mgr.getFeature('usage-test')!.usage!;
+    // implementation run + independent review both report $0.05 / 1200ms
+    expect(usage.runs).toBeGreaterThanOrEqual(2);
+    expect(usage.cost_usd).toBeCloseTo(0.05 * usage.runs, 5);
+    expect(usage.duration_ms).toBe(1200 * usage.runs);
   });
 
   it('add-test generates tests and re-reviews instead of silently completing', async () => {

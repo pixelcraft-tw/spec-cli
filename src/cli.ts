@@ -69,8 +69,9 @@ export function createProgram(): Command {
     .option('--test [types...]', 'Test strategy')
     .option('--skip-review', 'Skip final branch code review')
     .option('--docs <paths...>', 'Reference documents fed to the reviewer (put last)')
+    .option('--yes', 'Non-interactive: auto-approve reviews, keep branch (for CI/automation)')
     .allowUnknownOption()
-    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[] }, cmd: Command) => {
+    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[]; yes?: boolean }, cmd: Command) => {
       const rawArgs = cmd.args ?? [];
       const parsed = parseArgs(rawArgs);
       return implementCommand(name, parsed, options);

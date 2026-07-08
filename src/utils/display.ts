@@ -37,6 +37,43 @@ export function taskIcon(status: string): string {
   }
 }
 
+/**
+ * Live renderer for streamed backend events: assistant text and tool calls
+ * print as they happen, so long AI runs show progress instead of silence.
+ * Understands claude stream-json events; falls back to generic text events.
+ */
+export function renderBackendEvent(event: Record<string, unknown>): void {
+  const e = event as {
+    type?: string;
+    message?: { content?: Array<{ type?: string; text?: string; name?: string }> };
+    text?: string;
+  };
+
+  if (e.type === 'assistant' && Array.isArray(e.message?.content)) {
+    for (const block of e.message.content) {
+      if (block.type === 'text' && block.text?.trim()) {
+        console.log(chalk.gray(block.text.trimEnd().split('\n').map((l) => `  │ ${l}`).join('\n')));
+      } else if (block.type === 'tool_use' && block.name) {
+        console.log(chalk.dim(`  ⚙ ${block.name}`));
+      }
+    }
+    return;
+  }
+
+  // Generic text event (codex plain output)
+  if (typeof e.text === 'string' && e.text.trim() && !e.type) {
+    console.log(chalk.gray(`  │ ${e.text.trim()}`));
+  }
+}
+
+/** Format a duration in ms as "3m 42s". */
+export function formatDuration(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+}
+
 export function table(headers: string[], rows: string[][]): void {
   // Calculate column widths
   const widths = headers.map((h, i) => {

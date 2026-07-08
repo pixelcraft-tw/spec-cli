@@ -39,7 +39,7 @@ export async function reviewCommand(
       : '(plan not found)';
 
     display.info('Running independent expert review (spec & document conformance)...');
-    const output = await runExpertReview({
+    const review = await runExpertReview({
       backend,
       templateName: 'final-review',
       vars: {
@@ -48,14 +48,17 @@ export async function reviewCommand(
         plan_content: planContent,
         docs_content: loadDocs(options.docs),
       },
+      log: { dir: state.logsDir(), label: `${name}-final-review` },
+      onEvent: display.renderBackendEvent,
     });
+    state.recordUsage(feature, review);
 
     fs.mkdirSync(state.reviewsDir(), { recursive: true });
     const finalReviewPath = path.join(state.reviewsDir(), `${name}-final.md`);
-    fs.writeFileSync(finalReviewPath, output, 'utf-8');
+    fs.writeFileSync(finalReviewPath, review.output, 'utf-8');
 
     display.heading(`Independent Review: ${name}`);
-    console.log('\n' + output + '\n');
+    console.log('\n' + review.output + '\n');
     return;
   }
 

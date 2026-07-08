@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import type { AIBackend } from '../backends/interface.js';
-import { runPrompt } from '../backends/run.js';
+import { runPrompt, type RunLogTarget } from '../backends/run.js';
 import { assemblePrompt } from './prompt.js';
 
 /**
@@ -21,6 +21,12 @@ export function loadDocs(paths: string[] | undefined): string {
   return parts.join('\n\n');
 }
 
+export interface ExpertReviewResult {
+  output: string;
+  costUsd?: number;
+  durationMs?: number;
+}
+
 /**
  * Run a code review in an INDEPENDENT session.
  *
@@ -30,8 +36,8 @@ export function loadDocs(paths: string[] | undefined): string {
  * The assembled prompt instructs the reviewer to invoke the `/code-review`
  * skill / `code-reviewer` agent for depth.
  *
- * Returns the review output. The reviewer's session id is intentionally
- * discarded so it never contaminates the implementer session.
+ * Returns the review output plus usage metadata. The reviewer's session id is
+ * intentionally discarded so it never contaminates the implementer session.
  */
 export async function runExpertReview(opts: {
   backend: AIBackend;
@@ -40,7 +46,9 @@ export async function runExpertReview(opts: {
   agents?: string[];
   skills?: string[];
   extraText?: string;
-}): Promise<string> {
+  log?: RunLogTarget;
+  onEvent?: (event: Record<string, unknown>) => void;
+}): Promise<ExpertReviewResult> {
   const prompt = assemblePrompt({
     templateName: opts.templateName,
     vars: opts.vars,
@@ -49,6 +57,9 @@ export async function runExpertReview(opts: {
     extraText: opts.extraText,
   });
 
-  const result = await runPrompt(opts.backend, prompt);
-  return result.output;
+  const result = await runPrompt(opts.backend, prompt, {
+    log: opts.log,
+    onEvent: opts.onEvent,
+  });
+  return { output: result.output, costUsd: result.costUsd, durationMs: result.durationMs };
 }

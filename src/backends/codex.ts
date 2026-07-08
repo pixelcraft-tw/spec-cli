@@ -32,9 +32,25 @@ export class CodexBackend implements AIBackend {
 
       let stdout = '';
       let stderr = '';
+      let lineBuf = '';
 
       child.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+        stdout += chunk;
+        if (!opts?.onEvent) return;
+        lineBuf += chunk;
+        let nl: number;
+        while ((nl = lineBuf.indexOf('\n')) >= 0) {
+          const line = lineBuf.slice(0, nl).trim();
+          lineBuf = lineBuf.slice(nl + 1);
+          if (!line) continue;
+          try {
+            opts.onEvent(JSON.parse(line));
+          } catch {
+            // Plain text line — surface it as a text event
+            opts.onEvent({ text: line });
+          }
+        }
       });
 
       child.stderr.on('data', (data: Buffer) => {
@@ -48,6 +64,7 @@ export class CodexBackend implements AIBackend {
           sessionId: result.sessionId,
           exitCode: code ?? 1,
           stderr,
+          raw: stdout,
           signal,
         });
       });

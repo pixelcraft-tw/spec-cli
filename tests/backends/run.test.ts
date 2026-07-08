@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { runPrompt, BackendExecutionError } from '../../src/backends/run.js';
 
 function makeBackend(result: Record<string, unknown>) {
@@ -61,5 +64,38 @@ describe('runPrompt', () => {
     const backend = makeBackend({ output: 'hi', sessionId: 's', stderr: '' });
     const result = await runPrompt(backend, 'do it');
     expect(result.output).toBe('hi');
+  });
+
+  it('persists the raw event stream when a log target is given', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxs-logs-'));
+    const backend = makeBackend({ ...ok, raw: '{"type":"result"}' });
+
+    await runPrompt(backend, 'do it', { log: { dir, label: 'task-1-implement' } });
+
+    const files = fs.readdirSync(dir);
+    expect(files.some((f) => f.endsWith('-task-1-implement.jsonl'))).toBe(true);
+    const logFile = files.find((f) => f.endsWith('.jsonl'))!;
+    expect(fs.readFileSync(path.join(dir, logFile), 'utf-8')).toBe('{"type":"result"}');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('logs raw output and stderr even when the run fails', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxs-logs-'));
+    const backend = makeBackend({
+      output: '',
+      sessionId: '',
+      exitCode: 1,
+      stderr: 'quota exceeded',
+      raw: 'partial stream',
+    });
+
+    await expect(
+      runPrompt(backend, 'do it', { log: { dir, label: 'task-1-implement' } })
+    ).rejects.toThrow(BackendExecutionError);
+
+    const files = fs.readdirSync(dir);
+    expect(files.some((f) => f.endsWith('.jsonl'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.stderr.log'))).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
