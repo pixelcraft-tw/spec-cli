@@ -8,7 +8,13 @@ export function success(text: string): void {
   console.log(chalk.green(`  ✓ ${text}`));
 }
 
+/**
+ * Print an error line. Side effect: marks the process as failed
+ * (process.exitCode = 1) so scripts and CI can detect the failure —
+ * every call site is a fatal guard that returns immediately after.
+ */
 export function error(text: string): void {
+  process.exitCode = 1;
   console.log(chalk.red(`  ✗ ${text}`));
 }
 
