@@ -54,6 +54,22 @@ export function gitDiffBranch(base: string = 'main', cwd?: string): string {
   return run('git', ['diff', mergeBase], cwd);
 }
 
+export function gitRevParseHead(cwd?: string): string {
+  return run('git', ['rev-parse', 'HEAD'], cwd);
+}
+
+export function gitResetHard(ref: string, cwd?: string): void {
+  run('git', ['reset', '--hard', ref], cwd);
+}
+
+export function gitDiffStat(from: string, cwd?: string): string {
+  return run('git', ['diff', '--stat', from], cwd);
+}
+
+export function gitStashPushAll(message: string, cwd?: string): void {
+  run('git', ['stash', 'push', '-u', '-m', message], cwd);
+}
+
 export function isGitRepo(cwd?: string): boolean {
   try {
     run('git', ['rev-parse', '--is-inside-work-tree'], cwd);

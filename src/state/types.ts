@@ -18,6 +18,12 @@ export type TestType = 'unit' | 'intg' | 'both';
 export interface TaskState {
   name: string;
   status: TaskStatus;
+  /**
+   * HEAD sha captured once, when the task first enters in_progress.
+   * The task's commits are exactly anchor..HEAD — used to scope review
+   * diffs, resume interrupted tasks, and reset commits on request-change.
+   */
+  anchor?: string;
 }
 
 export interface SessionInfo {
@@ -76,8 +82,8 @@ export const PHASE_GUARDS: Record<string, Phase[]> = {
 // Valid task status transitions
 export const TASK_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   pending: ['in_progress', 'skipped'],
-  in_progress: ['review_pending'],
-  review_pending: ['complete', 'in_progress'], // in_progress = request-change
+  in_progress: ['review_pending', 'skipped'], // skipped = empty-diff guard
+  review_pending: ['complete', 'in_progress', 'skipped'], // in_progress = request-change / add-test
   complete: [],
   skipped: [],
 };

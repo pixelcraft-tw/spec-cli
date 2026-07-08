@@ -3,11 +3,26 @@ import path from 'node:path';
 import inquirer from 'inquirer';
 import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
+import { runPrompt } from '../backends/run.js';
 import { parsePlan } from '../parsers/plan.js';
 import { assemblePrompt } from '../utils/prompt.js';
 import { runExpertReview, loadDocs } from '../utils/review.js';
-import { gitBranch, gitCommit, gitDiff, gitDiffBranch, gitCheckout, gitMerge, gitCurrentBranch } from '../git/operations.js';
+import {
+  gitBranch,
+  gitCheckout,
+  gitCommit,
+  gitCurrentBranch,
+  gitDiff,
+  gitDiffBranch,
+  gitDiffStat,
+  gitMerge,
+  gitResetHard,
+  gitRevParseHead,
+  gitStashPushAll,
+  gitStatus,
+} from '../git/operations.js';
 import * as display from '../utils/display.js';
+import type { FeatureState } from '../state/types.js';
 
 export async function implementCommand(
   name: string,
@@ -73,122 +88,224 @@ export async function implementCommand(
 
     display.heading(`Task ${i + 1}: ${task.name}`);
 
-    // Update status
-    task.status = 'in_progress';
-    feature.current_task = i + 1;
-    state.upsertFeature(feature);
+    // Anchor: captured exactly once per task lifecycle. All of the task's
+    // commits are anchor..HEAD — the basis for review diffs, resume, and
+    // request-change resets. Never re-captured on resume.
+    if (!task.anchor) {
+      task.anchor = gitRevParseHead();
+    }
+    const anchor = task.anchor;
 
-    // Build prompt
-    const templateName = testConfig.tdd ? 'implement-tdd' : 'implement';
-    const previousDiff = i > 0 ? getDiffSummary() : '';
-    let taskDiff = previousDiff; // reused after commit
+    // Resume handling (spec §10.2): a review_pending task re-enters review
+    // directly; an in_progress task that already has commits (interrupted
+    // between commit and review) skips re-implementation.
+    const resumingReview = task.status === 'review_pending';
+    const resumingAfterCommit = task.status === 'in_progress' && safeDiff(anchor).trim().length > 0;
+    const needImplementation = !resumingReview && !resumingAfterCommit;
 
-    const prompt = assemblePrompt({
-      templateName,
-      vars: {
-        task_content: taskSpec.raw,
-        previous_diff: previousDiff,
-      },
-      agents: args.agents,
-      skills: args.skills,
-      extraText: args.text,
-    });
-
-    // Execute
-    const result = sessionId
-      ? await backend.resume(sessionId, prompt)
-      : await backend.execute(prompt);
-
-    sessionId = result.sessionId;
-    feature.session = { backend: backendName, id: sessionId };
-
-    // Commit implementation
-    try {
-      gitCommit(`${feature.type}(${name}): task-${i + 1} ${task.name}`);
-    } catch {
-      display.warn('Nothing to commit or commit failed.');
+    if (!needImplementation && !resumingReview) {
+      display.info('Resuming interrupted task — changes already committed, skipping re-implementation.');
     }
 
-    // Get diff once after commit — reused for tests and review
-    taskDiff = getDiffSummary();
+    feature.current_task = i + 1;
+    if (!resumingReview) {
+      task.status = 'in_progress';
+    }
+    state.upsertFeature(feature);
 
-    // Post-hoc tests (if not TDD)
-    if (testConfig.postHoc) {
-      display.info('Generating tests...');
-      const testType = testConfig.intg ? 'integration' : 'unit';
-      const testPrompt = assemblePrompt({
-        templateName: 'test',
+    const commitMessage = `${feature.type}(${name}): task-${i + 1} ${task.name}`;
+
+    if (needImplementation) {
+      // Build prompt
+      const templateName = testConfig.tdd ? 'implement-tdd' : 'implement';
+      const prompt = assemblePrompt({
+        templateName,
         vars: {
-          test_type: testType,
-          git_diff: taskDiff,
           task_content: taskSpec.raw,
+          previous_diff: previousTaskSummary(feature, i, anchor),
         },
+        agents: args.agents,
+        skills: args.skills,
+        extraText: args.text,
       });
 
-      await backend.resume(sessionId, testPrompt);
-      try {
-        gitCommit(`test(${name}): task-${i + 1} ${task.name}`);
-      } catch {
-        display.warn('No test changes to commit.');
-      }
+      // Execute — a failed CLI run (auth, quota, timeout) throws here.
+      // State is resumable: status in_progress + anchor are already persisted.
+      const result = await runPrompt(backend, prompt, { sessionId: sessionId || undefined });
+      sessionId = result.sessionId;
+      feature.session = { backend: backendName, id: sessionId };
+      state.upsertFeature(feature);
+
+      commitAll(commitMessage);
     }
 
-    // Independent AI review — runs in a FRESH session (not the implementer's),
-    // so the reviewer is not grading its own work. Its session is discarded and
-    // must not overwrite `sessionId`, which keeps the implementer context for the
-    // next task.
-    display.info('Running independent AI review...');
-    const reviewOutput = await runExpertReview({
-      backend,
-      templateName: 'review',
-      vars: {
-        git_diff: taskDiff,
-        task_content: taskSpec.raw,
-        docs_content: docsContent,
-      },
-      agents: args.agents,
-      skills: args.skills,
-    });
+    // Task diff is always scoped to the anchor — never HEAD~1 guessing.
+    let taskDiff = safeDiff(anchor);
 
-    // Save review
-    fs.writeFileSync(state.reviewPath(name, i + 1), reviewOutput, 'utf-8');
-
-    task.status = 'review_pending';
-    state.upsertFeature(feature);
-
-    // Present to user
-    console.log('\n' + reviewOutput + '\n');
-
-    const { choice } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'choice',
-        message: `Task ${i + 1} review:`,
-        choices: ['approve', 'request-change', 'add-test', 'skip'],
-      },
-    ]);
-
-    switch (choice) {
-      case 'approve':
-        task.status = 'complete';
-        state.upsertFeature(feature);
-        display.success(`Task ${i + 1} approved.`);
-        break;
-      case 'skip':
+    // Empty-diff guard: the backend reported success but changed nothing.
+    // Reviewing here would grade a stale/empty diff — ask the user instead.
+    if (needImplementation && !taskDiff.trim()) {
+      display.warn('The backend made no code changes for this task.');
+      const { choice } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'choice',
+          message: `Task ${i + 1} produced no changes:`,
+          choices: ['retry', 'skip', 'abort'],
+        },
+      ]);
+      if (choice === 'retry') {
+        i--;
+        continue;
+      }
+      if (choice === 'skip') {
         task.status = 'skipped';
         state.upsertFeature(feature);
         display.info(`Task ${i + 1} skipped.`);
-        break;
-      case 'request-change':
-        task.status = 'in_progress';
-        state.upsertFeature(feature);
-        display.info('Re-run `pxs implement` to retry this task.');
-        return;
-      case 'add-test':
-        display.info('Generating additional tests...');
-        task.status = 'complete';
-        state.upsertFeature(feature);
-        break;
+        continue;
+      }
+      // abort: leave in_progress; next run resumes here
+      display.info('Aborted. Run `pxs implement` again to retry this task.');
+      return;
+    }
+
+    // Post-hoc tests (if not TDD) — only on a fresh implementation pass
+    if (testConfig.postHoc && needImplementation) {
+      display.info('Generating tests...');
+      const testResult = await generateTests({
+        backend, sessionId, testConfig, taskDiff,
+        taskRaw: taskSpec.raw,
+        commitMessage: `test(${name}): task-${i + 1} ${task.name}`,
+      });
+      sessionId = testResult.sessionId;
+      feature.session = { backend: backendName, id: sessionId };
+      state.upsertFeature(feature);
+      taskDiff = safeDiff(anchor);
+    }
+
+    // Review + decision loop. add-test and request-change both loop back
+    // into a fresh independent review instead of silently completing.
+    reviewLoop: while (true) {
+      // Independent AI review — runs in a FRESH session (not the implementer's),
+      // so the reviewer is not grading its own work. Its session is discarded and
+      // must not overwrite `sessionId`, which keeps the implementer context for the
+      // next task.
+      display.info('Running independent AI review...');
+      const reviewOutput = await runExpertReview({
+        backend,
+        templateName: 'review',
+        vars: {
+          git_diff: taskDiff.trim() ? taskDiff : '(the backend produced no changes on this attempt)',
+          task_content: taskSpec.raw,
+          docs_content: docsContent,
+        },
+        agents: args.agents,
+        skills: args.skills,
+      });
+
+      // Save review
+      fs.writeFileSync(state.reviewPath(name, i + 1), reviewOutput, 'utf-8');
+
+      task.status = 'review_pending';
+      state.upsertFeature(feature);
+
+      // Present to user
+      console.log('\n' + reviewOutput + '\n');
+
+      const { choice } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'choice',
+          message: `Task ${i + 1} review:`,
+          choices: ['approve', 'request-change', 'add-test', 'skip'],
+        },
+      ]);
+
+      switch (choice) {
+        case 'approve':
+          task.status = 'complete';
+          state.upsertFeature(feature);
+          display.success(`Task ${i + 1} approved.`);
+          break reviewLoop;
+
+        case 'skip':
+          task.status = 'skipped';
+          state.upsertFeature(feature);
+          display.info(`Task ${i + 1} skipped.`);
+          break reviewLoop;
+
+        case 'add-test': {
+          task.status = 'in_progress';
+          state.upsertFeature(feature);
+          display.info('Generating additional tests...');
+          const result = await generateTests({
+            backend, sessionId, testConfig, taskDiff,
+            taskRaw: taskSpec.raw,
+            commitMessage: `test(${name}): task-${i + 1} ${task.name}`,
+          });
+          sessionId = result.sessionId;
+          feature.session = { backend: backendName, id: sessionId };
+          state.upsertFeature(feature);
+          taskDiff = safeDiff(anchor);
+          continue reviewLoop;
+        }
+
+        case 'request-change': {
+          const { feedback } = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'feedback',
+              message: 'Describe the changes you want:',
+            },
+          ]);
+
+          // Capture what gets discarded BEFORE resetting — shown to the user
+          // and handed to the AI so it knows its previous edits are gone.
+          const discardedStat = safeDiffStat(anchor);
+
+          // Unexpected uncommitted files (e.g. reviewer droppings) must not
+          // be silently destroyed by reset --hard — stash them recoverably.
+          if (gitStatus().trim()) {
+            display.warn('Worktree has uncommitted changes — stashing them (recover with `git stash pop`).');
+            gitStashPushAll(`pxs: pre-request-change ${name} task-${i + 1}`);
+          }
+
+          display.info("Discarding this task's commits:");
+          console.log(discardedStat || '  (nothing to discard)');
+          gitResetHard(anchor);
+
+          // Persist status only AFTER the reset succeeded: if we crash in
+          // between, state still says review_pending with an unchanged anchor
+          // and the empty-diff guard catches it safely on the next run.
+          task.status = 'in_progress';
+          state.upsertFeature(feature);
+
+          const templateName = testConfig.tdd ? 'implement-tdd' : 'implement';
+          const redoPrompt =
+            assemblePrompt({
+              templateName,
+              vars: {
+                task_content: taskSpec.raw,
+                previous_diff: previousTaskSummary(feature, i, anchor),
+              },
+              agents: args.agents,
+              skills: args.skills,
+              extraText: args.text,
+            }) + revertedAttemptBlock(discardedStat, feedback);
+
+          const result = await runPrompt(backend, redoPrompt, { sessionId: sessionId || undefined });
+          sessionId = result.sessionId;
+          feature.session = { backend: backendName, id: sessionId };
+          state.upsertFeature(feature);
+
+          commitAll(commitMessage);
+          taskDiff = safeDiff(anchor);
+          if (!taskDiff.trim()) {
+            display.warn('The backend made no changes on this attempt.');
+          }
+          continue reviewLoop;
+        }
+      }
     }
   }
 
@@ -260,12 +377,107 @@ export async function implementCommand(
   }
 }
 
-function getDiffSummary(): string {
+/** Diff of everything (committed or not) since the given anchor commit. */
+function safeDiff(anchor: string): string {
   try {
-    return gitDiff('HEAD~1');
+    return gitDiff(anchor);
   } catch {
-    return '(no previous diff available)';
+    return '';
   }
+}
+
+function safeDiffStat(anchor: string): string {
+  try {
+    return gitDiffStat(anchor);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Summary of the previous task's changes: the diff between its anchor and
+ * the current task's anchor (i.e. exactly the commits it produced).
+ */
+function previousTaskSummary(feature: FeatureState, index: number, currentAnchor: string): string {
+  if (index === 0) return '';
+  const prev = feature.tasks[index - 1];
+  if (!prev?.anchor) return '';
+  try {
+    return gitDiff(prev.anchor, currentAnchor);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Stage and commit all changes, printing what gets swept in so `git add -A`
+ * never silently commits stray files. Returns false when the worktree is
+ * clean (benign: the AI made no changes). Real git failures propagate —
+ * per the spec, git errors are displayed, never auto-fixed or swallowed.
+ */
+function commitAll(message: string): boolean {
+  const status = gitStatus().trim();
+  if (!status) {
+    display.info('No changes to commit.');
+    return false;
+  }
+  const lines = status.split('\n');
+  display.info(`Committing ${lines.length} file(s):`);
+  for (const line of lines.slice(0, 20)) {
+    console.log(`    ${line}`);
+  }
+  if (lines.length > 20) {
+    console.log(`    … and ${lines.length - 20} more`);
+  }
+  gitCommit(message);
+  return true;
+}
+
+/** Generate tests in the implementer session and commit them. */
+async function generateTests(opts: {
+  backend: ReturnType<typeof createBackend>;
+  sessionId: string;
+  testConfig: TestConfig;
+  taskDiff: string;
+  taskRaw: string;
+  commitMessage: string;
+}): Promise<{ sessionId: string }> {
+  const testType = opts.testConfig.intg ? 'integration' : 'unit';
+  const testPrompt = assemblePrompt({
+    templateName: 'test',
+    vars: {
+      test_type: testType,
+      git_diff: opts.taskDiff,
+      task_content: opts.taskRaw,
+    },
+  });
+
+  const result = await runPrompt(opts.backend, testPrompt, {
+    sessionId: opts.sessionId || undefined,
+  });
+  commitAll(opts.commitMessage);
+  return { sessionId: result.sessionId };
+}
+
+/**
+ * Prompt block appended when re-running a task after request-change: the AI
+ * resumes the same session, so it must be told its earlier edits were
+ * reverted or it will act on stale memory of files that no longer exist.
+ */
+function revertedAttemptBlock(discardedStat: string, feedback: string): string {
+  return `
+
+## Previous Attempt Reverted
+Your previous implementation of this task was reviewed and rejected. Its commits
+were discarded via \`git reset --hard\`; the following files were restored to their
+state before your previous attempt and no longer contain those edits:
+
+${discardedStat || '(no file list available)'}
+
+Do not assume any previous edits still exist — re-read current file contents before editing.
+
+## User Feedback
+${feedback}`;
 }
 
 interface TestConfig {

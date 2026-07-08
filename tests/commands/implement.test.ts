@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import inquirer from 'inquirer';
 import { StateManager } from '../../src/state/manager.js';
+import * as git from '../../src/git/operations.js';
 
 // Mock inquirer
 vi.mock('inquirer', () => ({
   default: {
-    prompt: vi.fn().mockResolvedValue({ choice: 'approve' }),
+    prompt: vi.fn(),
   },
 }));
 
@@ -15,11 +17,16 @@ vi.mock('inquirer', () => ({
 vi.mock('../../src/git/operations.js', () => ({
   gitBranch: vi.fn(),
   gitCheckout: vi.fn(),
-  gitCurrentBranch: vi.fn().mockReturnValue('develop'),
+  gitCurrentBranch: vi.fn(),
   gitCommit: vi.fn(),
-  gitDiff: vi.fn().mockReturnValue('diff output'),
-  gitDiffBranch: vi.fn().mockReturnValue('branch diff'),
+  gitDiff: vi.fn(),
+  gitDiffBranch: vi.fn(),
+  gitDiffStat: vi.fn(),
   gitMerge: vi.fn(),
+  gitResetHard: vi.fn(),
+  gitRevParseHead: vi.fn(),
+  gitStashPushAll: vi.fn(),
+  gitStatus: vi.fn(),
 }));
 
 // Mock backend
@@ -34,6 +41,13 @@ vi.mock('../../src/backends/factory.js', () => ({
   createBackend: () => mockBackend,
 }));
 
+const okResult = (output: string, sessionId: string) => ({
+  output,
+  sessionId,
+  exitCode: 0,
+  stderr: '',
+});
+
 describe('pxs implement', () => {
   let tmpDir: string;
   let originalCwd: string;
@@ -44,17 +58,23 @@ describe('pxs implement', () => {
     process.chdir(tmpDir);
 
     // Reset mock defaults
-    mockBackend.isAvailable.mockResolvedValue(true);
-    mockBackend.execute.mockResolvedValue({
-      output: 'implementation output',
-      sessionId: 'sess-1',
-      exitCode: 0,
-    });
-    mockBackend.resume.mockResolvedValue({
-      output: '## Review\nLooks good!',
-      sessionId: 'sess-2',
-      exitCode: 0,
-    });
+    vi.mocked(inquirer.prompt).mockReset().mockResolvedValue({ choice: 'approve' });
+    mockBackend.isAvailable.mockReset().mockResolvedValue(true);
+    mockBackend.execute.mockReset().mockResolvedValue(okResult('implementation output', 'sess-1'));
+    mockBackend.resume.mockReset().mockResolvedValue(okResult('## Review\nLooks good!', 'sess-2'));
+
+    vi.mocked(git.gitCurrentBranch).mockReset().mockReturnValue('develop');
+    vi.mocked(git.gitDiff).mockReset().mockReturnValue('diff output');
+    vi.mocked(git.gitDiffBranch).mockReset().mockReturnValue('branch diff');
+    vi.mocked(git.gitDiffStat).mockReset().mockReturnValue(' src/file.ts | 10 +');
+    vi.mocked(git.gitRevParseHead).mockReset().mockReturnValue('anchor-sha');
+    vi.mocked(git.gitStatus).mockReset().mockReturnValue(' M src/file.ts');
+    vi.mocked(git.gitBranch).mockReset();
+    vi.mocked(git.gitCheckout).mockReset();
+    vi.mocked(git.gitCommit).mockReset();
+    vi.mocked(git.gitMerge).mockReset();
+    vi.mocked(git.gitResetHard).mockReset();
+    vi.mocked(git.gitStashPushAll).mockReset();
 
     fs.mkdirSync(path.join(tmpDir, '.workflow', 'specs'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.workflow', 'plans'), { recursive: true });
@@ -72,11 +92,17 @@ describe('pxs implement', () => {
       path.join(tmpDir, '.workflow', 'prompts', 'review.md'),
       'Review:\n{git_diff}\n{task_content}'
     );
+    fs.writeFileSync(
+      path.join(tmpDir, '.workflow', 'prompts', 'test.md'),
+      'Test:\n{test_type}\n{git_diff}\n{task_content}'
+    );
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    // display.error marks the process as failed; keep vitest's own exit clean
+    process.exitCode = 0;
   });
 
   function seedReady(name: string) {
@@ -190,5 +216,140 @@ describe('pxs implement', () => {
 
     const feature = mgr.getFeature('skip-test')!;
     expect(feature.tasks[0].status).toBe('complete');
+  });
+
+  it('records the task anchor and completes the task on approve', async () => {
+    seedReady('anchor-test');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('anchor-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('anchor-test')!;
+    expect(feature.tasks[0].anchor).toBe('anchor-sha');
+    expect(feature.tasks[0].status).toBe('complete');
+    // Task diff must be scoped to the anchor, never HEAD~1
+    expect(git.gitDiff).toHaveBeenCalledWith('anchor-sha');
+  });
+
+  it('propagates backend failure and leaves the task resumable', async () => {
+    seedReady('fail-test');
+    mockBackend.execute.mockResolvedValue({
+      output: '',
+      sessionId: '',
+      exitCode: 1,
+      stderr: 'API quota exceeded',
+    });
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await expect(
+      implementCommand('fail-test', { agents: [], skills: [], text: '' }, { skipReview: true })
+    ).rejects.toThrow(/claude CLI failed: exit code 1/);
+
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('fail-test')!;
+    // Resumable: status + anchor persisted before the backend call
+    expect(feature.tasks[0].status).toBe('in_progress');
+    expect(feature.tasks[0].anchor).toBe('anchor-sha');
+    // Nothing was committed for the failed run
+    expect(git.gitCommit).not.toHaveBeenCalled();
+  });
+
+  it('resumes a review_pending task directly into review without re-implementing', async () => {
+    const plan = `# Implementation Plan: resume-test
+
+> type: feat
+> branch: feat/resume-test
+> total_tasks: 1
+
+## Task 1: Interrupted task
+- **Description**: Was committed, review never finished
+`;
+    fs.writeFileSync(path.join(tmpDir, '.workflow', 'plans', 'resume-test.md'), plan);
+
+    const mgr = new StateManager(tmpDir);
+    mgr.upsertFeature({
+      feature: 'resume-test',
+      type: 'feat',
+      branch: 'feat/resume-test',
+      base_branch: 'develop',
+      phase: 'implementing',
+      total_tasks: 1,
+      current_task: 1,
+      session: { backend: 'claude', id: 'sess-old' },
+      tasks: [{ name: 'Interrupted task', status: 'review_pending', anchor: 'anchor-sha' }],
+    });
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('resume-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    // Implementer session was never resumed — only the fresh-session review ran
+    expect(mockBackend.resume).not.toHaveBeenCalled();
+    expect(mockBackend.execute).toHaveBeenCalledTimes(1);
+
+    const feature = mgr.getFeature('resume-test')!;
+    expect(feature.tasks[0].status).toBe('complete');
+  });
+
+  it('guards against an empty diff instead of reviewing stale changes', async () => {
+    seedReady('empty-test');
+    vi.mocked(git.gitDiff).mockReturnValue('');
+    vi.mocked(git.gitStatus).mockReturnValue('');
+    vi.mocked(inquirer.prompt).mockResolvedValue({ choice: 'skip' });
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('empty-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('empty-test')!;
+    expect(feature.tasks[0].status).toBe('skipped');
+    // Only the implementation call ran — no review of an empty/stale diff
+    expect(mockBackend.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('request-change resets to the anchor and re-runs with feedback', async () => {
+    seedReady('redo-test');
+    vi.mocked(inquirer.prompt)
+      .mockResolvedValueOnce({ choice: 'request-change' })
+      .mockResolvedValueOnce({ feedback: 'use the shared logger instead' })
+      .mockResolvedValueOnce({ choice: 'approve' })
+      .mockResolvedValue({ choice: 'approve' });
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('redo-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    expect(git.gitResetHard).toHaveBeenCalledWith('anchor-sha');
+
+    // The redo prompt must tell the AI its work was reverted and carry the feedback
+    const redoCall = mockBackend.resume.mock.calls.find(
+      ([, prompt]) => typeof prompt === 'string' && prompt.includes('Previous Attempt Reverted')
+    );
+    expect(redoCall).toBeDefined();
+    expect(redoCall![1]).toContain('use the shared logger instead');
+
+    const mgr = new StateManager(tmpDir);
+    expect(mgr.getFeature('redo-test')!.tasks[0].status).toBe('complete');
+  });
+
+  it('add-test generates tests and re-reviews instead of silently completing', async () => {
+    seedReady('addtest-test');
+    vi.mocked(inquirer.prompt)
+      .mockResolvedValueOnce({ choice: 'add-test' })
+      .mockResolvedValueOnce({ choice: 'approve' })
+      .mockResolvedValue({ choice: 'approve' });
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('addtest-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    // Test generation ran in the implementer session with the test template
+    const testCall = mockBackend.resume.mock.calls.find(
+      ([, prompt]) => typeof prompt === 'string' && prompt.includes('Test:')
+    );
+    expect(testCall).toBeDefined();
+    // Review ran twice: initial + after add-test (both fresh sessions)
+    expect(mockBackend.execute.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+    const mgr = new StateManager(tmpDir);
+    expect(mgr.getFeature('addtest-test')!.tasks[0].status).toBe('complete');
   });
 });
