@@ -1,14 +1,23 @@
-export type Phase =
-  | 'spec_created'
-  | 'clarifying'
-  | 'spec_approved'
-  | 'plan_pending_approval'
-  | 'ready_to_implement'
-  | 'implementing'
-  | 'completed'
-  | 'merged';
+export const PHASES = [
+  'spec_created',
+  'clarifying',
+  'spec_approved',
+  'plan_pending_approval',
+  'ready_to_implement',
+  'implementing',
+  'completed',
+  'merged',
+] as const;
+export type Phase = (typeof PHASES)[number];
 
-export type TaskStatus = 'pending' | 'in_progress' | 'review_pending' | 'complete' | 'skipped';
+export const TASK_STATUSES = [
+  'pending',
+  'in_progress',
+  'review_pending',
+  'complete',
+  'skipped',
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export type FeatureType = 'feat' | 'fix' | 'refactor' | 'docs' | 'chore';
 

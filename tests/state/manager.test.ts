@@ -115,4 +115,51 @@ describe('StateManager', () => {
     expect(mgr.planPath('my-feat')).toBe(path.join(tmpDir, '.workflow', 'plans', 'my-feat.md'));
     expect(mgr.reviewPath('my-feat', 2)).toBe(path.join(tmpDir, '.workflow', 'reviews', 'my-feat-task-2.md'));
   });
+
+  it('writes state atomically without leaving temp files', () => {
+    mgr.upsertFeature({
+      feature: 'atomic-test',
+      type: 'feat',
+      branch: '',
+      phase: 'spec_created',
+      total_tasks: 0,
+      current_task: 0,
+      tasks: [],
+    });
+
+    const files = fs.readdirSync(path.join(tmpDir, '.workflow'));
+    expect(files).toContain('state.yaml');
+    expect(files.some((f) => f.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('rejects a state file with an unknown phase, naming the field', () => {
+    fs.writeFileSync(
+      mgr.statePath,
+      'features:\n  - feature: broken\n    phase: implmenting\n    tasks: []\n'
+    );
+    expect(() => mgr.readState()).toThrow(/unknown phase "implmenting"/);
+    expect(() => mgr.readState()).toThrow(/valid: spec_created/);
+  });
+
+  it('rejects a task with an unknown status, naming the task', () => {
+    fs.writeFileSync(
+      mgr.statePath,
+      'features:\n  - feature: broken\n    phase: implementing\n    tasks:\n      - name: T1\n        status: done\n'
+    );
+    expect(() => mgr.readState()).toThrow(/task "T1" has unknown status "done"/);
+  });
+
+  it('rejects invalid YAML with a clear pointer to the file', () => {
+    fs.writeFileSync(mgr.statePath, 'features: [unclosed');
+    expect(() => mgr.readState()).toThrow(/Corrupt state file/);
+  });
+
+  it('merges config defaults for hand-edited configs with missing keys', () => {
+    fs.writeFileSync(mgr.configPath, 'project:\n  name: partial\n');
+    const config = mgr.readConfig();
+    expect(config.project.name).toBe('partial');
+    expect(config.backend.default).toBe('claude');
+    expect(config.test.strategy).toBe('none');
+    expect(config.git.convention).toBe('conventional');
+  });
 });
