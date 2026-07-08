@@ -88,6 +88,7 @@ After all tasks complete, a **final branch code review** runs automatically agai
 | Option | Description |
 |--------|-------------|
 | `--skip-review` | Skip final branch code review / 跳過最終 code review |
+| `--yes` | Non-interactive: auto-approve reviews, keep branch (CI/automation) / 非互動模式，自動核可並保留分支 |
 | `@agent /skill` | Pass agents or skills to assist review / 指定 agent 或 skill 協助 review |
 
 **Test strategies / 測試策略:**
@@ -114,9 +115,9 @@ View review records.
 
 ### `pxs status [name]`
 
-View workflow status. Without `<name>`, lists all features.
+View workflow status, including accumulated AI cost, duration, and run count per feature. Without `<name>`, lists all features.
 
-查看工作流狀態。不帶 `<name>` 則列出所有 feature。
+查看工作流狀態，含每個 feature 累積的 AI 成本、耗時與執行次數。不帶 `<name>` 則列出所有 feature。
 
 ### `pxs reset <name>`
 
@@ -184,6 +185,7 @@ After `pxs init`, the following slash commands are available in Claude Code:
 ├── specs/              # Feature specs / 功能規格
 ├── plans/              # Implementation plans / 實作計畫
 ├── reviews/            # AI review records / AI review 紀錄
+├── logs/               # Raw AI output per run, for debugging / 每次執行的原始輸出
 └── prompts/            # Prompt templates / Prompt 模板
 ```
 
