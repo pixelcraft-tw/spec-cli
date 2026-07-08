@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runPrompt, BackendExecutionError } from '../../src/backends/run.js';
+import { runPrompt, BackendExecutionError, BackendFormatError } from '../../src/backends/run.js';
 
 function makeBackend(result: Record<string, unknown>) {
   return {
@@ -64,6 +64,20 @@ describe('runPrompt', () => {
     const backend = makeBackend({ output: 'hi', sessionId: 's', stderr: '' });
     const result = await runPrompt(backend, 'do it');
     expect(result.output).toBe('hi');
+  });
+
+  it('detects output-format drift: exit 0, raw data, nothing parseable', async () => {
+    const backend = makeBackend({
+      output: '',
+      sessionId: '',
+      exitCode: 0,
+      stderr: '',
+      raw: '{"type":"unknown-new-event"}',
+    });
+
+    const err = await runPrompt(backend, 'do it').catch((e) => e);
+    expect(err).toBeInstanceOf(BackendFormatError);
+    expect(err.message).toContain('version incompatibility');
   });
 
   it('persists the raw event stream when a log target is given', async () => {

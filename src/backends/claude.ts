@@ -1,6 +1,8 @@
 import { spawn, execFileSync } from 'node:child_process';
 import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
+const IS_WINDOWS = process.platform === 'win32';
+
 export interface StreamJsonSummary {
   output: string;
   sessionId: string;
@@ -51,7 +53,7 @@ export class ClaudeBackend implements AIBackend {
 
   async isAvailable(): Promise<boolean> {
     try {
-      execFileSync('which', ['claude'], { encoding: 'utf-8' });
+      execFileSync(IS_WINDOWS ? 'where' : 'which', ['claude'], { encoding: 'utf-8' });
       return true;
     } catch {
       return false;
@@ -60,27 +62,42 @@ export class ClaudeBackend implements AIBackend {
 
   async execute(prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
     // --verbose is required for stream-json in print mode
-    return this._run(
-      ['claude', '-p', prompt, '--output-format', 'stream-json', '--verbose'],
-      opts
-    );
+    return this._run(['claude', '-p', '--output-format', 'stream-json', '--verbose'], prompt, opts);
   }
 
   async resume(sessionId: string, prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
+    // Session ids come from parsed CLI output; validate before they re-enter
+    // argv (defense in depth for win32 shell mode)
+    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+      throw new Error(`Invalid session id: "${sessionId}"`);
+    }
     return this._run(
-      ['claude', '-p', prompt, '--resume', sessionId, '--output-format', 'stream-json', '--verbose'],
+      ['claude', '-p', '--resume', sessionId, '--output-format', 'stream-json', '--verbose'],
+      prompt,
       opts
     );
   }
 
-  private _run(args: string[], opts?: ExecuteOptions): Promise<ExecuteResult> {
+  private _run(args: string[], prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
     const [cmd, ...cmdArgs] = args;
     return new Promise((resolve, reject) => {
       const child = spawn(cmd, cmdArgs, {
         cwd: opts?.cwd ?? process.cwd(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         timeout: opts?.timeout,
+        // win32: claude is a .cmd shim that Node cannot spawn directly.
+        // Safe with shell because argv holds only fixed flags + validated
+        // session id — the prompt goes through stdin, never the shell.
+        shell: IS_WINDOWS,
       });
+
+      // Prompt via stdin: argv has OS size limits (~256KB single-arg on
+      // macOS) that a large spec + plan prompt can exceed; stdin has none.
+      child.stdin.on('error', () => {
+        // EPIPE when the CLI exits before reading — close event reports it
+      });
+      child.stdin.write(prompt);
+      child.stdin.end();
 
       let stdout = '';
       let stderr = '';

@@ -25,6 +25,21 @@ export class BackendExecutionError extends Error {
   }
 }
 
+/**
+ * Raised when the CLI exited successfully and produced data, but none of it
+ * was parseable — the stream format has likely drifted across CLI versions.
+ */
+export class BackendFormatError extends Error {
+  constructor(backend: string) {
+    super(
+      `${backend} CLI returned data but no parseable output — possible CLI version ` +
+        `incompatibility. Run \`${backend} --version\`, check for output format changes, ` +
+        'and inspect the raw stream in .workflow/logs/.'
+    );
+    this.name = 'BackendFormatError';
+  }
+}
+
 /** Where to persist a run's raw output for later debugging. */
 export interface RunLogTarget {
   dir: string;
@@ -61,6 +76,12 @@ export async function runPrompt(
       .slice(-STDERR_TAIL_LINES)
       .join('\n');
     throw new BackendExecutionError(backend.name, result.exitCode, result.signal, tail);
+  }
+
+  // Exit 0 with raw data but nothing parseable = the stream format drifted;
+  // treating it as success would feed empty output downstream.
+  if (!result.output.trim() && (result.raw ?? '').trim()) {
+    throw new BackendFormatError(backend.name);
   }
 
   return result;

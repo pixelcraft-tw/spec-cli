@@ -1,12 +1,17 @@
 import { spawn, execFileSync } from 'node:child_process';
 import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
+// NOTE: the codex backend spawns without a shell and passes the prompt via
+// argv, so it is POSIX-only (on Windows the .cmd shim cannot be spawned
+// directly, and shell mode would be unsafe with an arbitrary prompt in argv).
 export class CodexBackend implements AIBackend {
   name = 'codex';
 
   async isAvailable(): Promise<boolean> {
     try {
-      execFileSync('which', ['codex'], { encoding: 'utf-8' });
+      execFileSync(process.platform === 'win32' ? 'where' : 'which', ['codex'], {
+        encoding: 'utf-8',
+      });
       return true;
     } catch {
       return false;
