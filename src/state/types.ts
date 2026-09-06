@@ -21,6 +21,17 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export type FeatureType = 'feat' | 'fix' | 'refactor' | 'docs' | 'chore';
 
+export const REVIEW_MODES = ['agent', 'codex'] as const;
+/** agent = isolated Claude Code reviewer · codex = OpenAI Codex CLI reviewer */
+export type ReviewMode = (typeof REVIEW_MODES)[number];
+
+/** Independent reviewer selection: which CLI reviews, with what model/effort. */
+export interface ReviewChoice {
+  mode: ReviewMode;
+  model?: string;
+  effort?: string;
+}
+
 export type TestStrategy = 'tdd' | 'after' | 'none';
 export type TestType = 'unit' | 'intg' | 'both';
 
@@ -57,6 +68,8 @@ export interface FeatureState {
   current_task: number;
   session?: SessionInfo;
   usage?: UsageInfo;
+  /** Reviewer chosen for this feature (pxs new); overrides config.review. */
+  review?: ReviewChoice;
   tasks: TaskState[];
 }
 
@@ -81,6 +94,11 @@ export interface ProjectConfig {
   test: {
     strategy: TestStrategy;
     type: TestType;
+  };
+  review: {
+    mode: ReviewMode;
+    agent: { model: string; effort: string };
+    codex: { model: string; effort: string };
   };
 }
 

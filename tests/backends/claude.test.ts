@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseStreamJson } from '../../src/backends/claude.js';
+import { parseStreamJson, buildClaudeArgs } from '../../src/backends/claude.js';
 
 // Golden-file style fixture: this is the format-fragile boundary with the
 // claude CLI — if the stream-json format drifts, these tests catch it.
@@ -55,5 +55,25 @@ describe('parseStreamJson', () => {
     const summary = parseStreamJson('');
     expect(summary.output).toBe('');
     expect(summary.sessionId).toBe('');
+  });
+});
+
+describe('buildClaudeArgs', () => {
+  it('adds nothing when no reviewer options are set', () => {
+    expect(buildClaudeArgs()).toEqual([]);
+    expect(buildClaudeArgs({})).toEqual([]);
+  });
+
+  it('maps model, effort and read-only to CLI flags', () => {
+    expect(buildClaudeArgs({ model: 'opus', effort: 'xhigh', readOnly: true })).toEqual([
+      '--model', 'opus',
+      '--effort', 'xhigh',
+      '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit',
+    ]);
+  });
+
+  it('rejects values that are unsafe for argv', () => {
+    expect(() => buildClaudeArgs({ model: 'opus; rm -rf /' })).toThrow(/Invalid claude model/);
+    expect(() => buildClaudeArgs({ effort: 'high low' })).toThrow(/Invalid claude effort/);
   });
 });

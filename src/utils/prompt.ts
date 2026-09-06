@@ -102,17 +102,25 @@ function discoverReviewTools(cwd: string = process.cwd()): { commands: string[];
 }
 
 /**
- * Build auto-discovery block for review prompts when no agents/skills are provided.
+ * Independent-reviewer framing appended to every review prompt. The
+ * Claude-specific tooling hints (/code-review, code-reviewer agent) are only
+ * meaningful when the reviewer is a Claude Code process, so they are skipped
+ * for the codex reviewer.
  */
-function buildReviewAutoDiscoveryBlock(cwd: string = process.cwd()): string {
-  const { commands, skills } = discoverReviewTools(cwd);
-
+function buildReviewAutoDiscoveryBlock(cwd: string = process.cwd(), reviewer?: string): string {
   const parts: string[] = [];
   parts.push('\n## Review Tool Instructions');
-  parts.push('You are an INDEPENDENT reviewer. You did NOT write this code — do not assume it is correct.');
+  parts.push('You are an INDEPENDENT reviewer running in an isolated, read-only process — a different session (and possibly a different model) from the one that wrote this code. You did NOT write it; do not assume it is correct.');
+  parts.push('You cannot edit files: report findings only.');
   parts.push('You MUST perform a thorough code review. Do NOT just summarize the git diff.');
   parts.push('Open and read the ACTUAL changed files in the repository; analyze the real logic for correctness, security, performance, and quality.');
+
+  if (reviewer === 'codex') {
+    return parts.join('\n');
+  }
+
   parts.push('If a `/code-review` skill or a `code-reviewer` agent is available, INVOKE IT to perform the deep review, then incorporate its findings into your verdict.');
+  const { commands, skills } = discoverReviewTools(cwd);
 
   if (commands.length > 0) {
     parts.push(`\nAvailable project review commands: ${commands.join(', ')}`);
@@ -139,6 +147,8 @@ export function assemblePrompt(opts: {
   skills?: string[];
   extraText?: string;
   cwd?: string;
+  /** Backend name of the independent reviewer (review templates only). */
+  reviewer?: string;
 }): string {
   const template = loadPrompt(opts.templateName, opts.cwd);
   let prompt = renderPrompt(template, opts.vars);
@@ -161,7 +171,7 @@ export function assemblePrompt(opts: {
   // surface available review tooling (/code-review, code-reviewer agent, etc.),
   // even when explicit agents/skills were also requested.
   if (REVIEW_TEMPLATES.includes(opts.templateName)) {
-    prompt += buildReviewAutoDiscoveryBlock(opts.cwd);
+    prompt += buildReviewAutoDiscoveryBlock(opts.cwd, opts.reviewer);
   }
 
   if (opts.extraText) {

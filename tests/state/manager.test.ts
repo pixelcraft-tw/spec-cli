@@ -163,3 +163,62 @@ describe('StateManager', () => {
     expect(config.git.convention).toBe('conventional');
   });
 });
+
+describe('StateManager review settings', () => {
+  let tmpDir: string;
+  let mgr: StateManager;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxs-review-state-'));
+    fs.mkdirSync(path.join(tmpDir, '.workflow'), { recursive: true });
+    mgr = new StateManager(tmpDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fills nested review defaults for configs without a review section', () => {
+    fs.writeFileSync(mgr.configPath, 'project:\n  name: partial\n');
+    const config = mgr.readConfig();
+    expect(config.review).toEqual({
+      mode: 'agent',
+      agent: { model: '', effort: '' },
+      codex: { model: '', effort: '' },
+    });
+  });
+
+  it('keeps sub-defaults when only part of the review section is set', () => {
+    fs.writeFileSync(
+      mgr.configPath,
+      'project:\n  name: partial\nreview:\n  mode: codex\n  codex:\n    effort: high\n'
+    );
+    const config = mgr.readConfig();
+    expect(config.review.mode).toBe('codex');
+    expect(config.review.codex).toEqual({ model: '', effort: 'high' });
+    expect(config.review.agent).toEqual({ model: '', effort: '' });
+  });
+
+  it('rejects a feature with an unknown review mode', () => {
+    fs.writeFileSync(
+      mgr.statePath,
+      'features:\n  - feature: broken\n    phase: spec_created\n    tasks: []\n    review:\n      mode: gemini\n'
+    );
+    expect(() => mgr.readState()).toThrow(/unknown review mode "gemini"/);
+    expect(() => mgr.readState()).toThrow(/valid: agent, codex/);
+  });
+
+  it('round-trips a per-feature reviewer choice', () => {
+    mgr.upsertFeature({
+      feature: 'f',
+      type: 'feat',
+      branch: '',
+      phase: 'spec_created',
+      total_tasks: 0,
+      current_task: 0,
+      tasks: [],
+      review: { mode: 'codex', model: 'gpt-5.5', effort: 'high' },
+    });
+    expect(mgr.getFeature('f')!.review).toEqual({ mode: 'codex', model: 'gpt-5.5', effort: 'high' });
+  });
+});

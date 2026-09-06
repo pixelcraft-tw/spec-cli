@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCodexJson } from '../../src/backends/codex.js';
+import { parseCodexJson, buildCodexArgs } from '../../src/backends/codex.js';
 
 // Golden-file style fixture captured from `codex exec --json` (codex-cli
 // 0.144.1). This is the format-fragile boundary with the codex CLI — if the
@@ -61,5 +61,30 @@ describe('parseCodexJson', () => {
     expect(summary.output).toBe('');
     expect(summary.sessionId).toBe('');
     expect(summary.numTurns).toBeUndefined();
+  });
+});
+
+describe('buildCodexArgs', () => {
+  it('adds nothing when no reviewer options are set', () => {
+    expect(buildCodexArgs()).toEqual([]);
+    expect(buildCodexArgs({})).toEqual([]);
+  });
+
+  it('maps model, effort and read-only to CLI flags', () => {
+    expect(buildCodexArgs({ model: 'gpt-5.5', effort: 'high', readOnly: true })).toEqual([
+      '-m', 'gpt-5.5',
+      // bare value: kept as a string literal by codex, and no quotes for cmd.exe to strip
+      '-c', 'model_reasoning_effort=high',
+      '-s', 'read-only',
+    ]);
+  });
+
+  it('passes newer effort levels through — the CLI has the final say', () => {
+    expect(buildCodexArgs({ effort: 'ultra' })).toEqual(['-c', 'model_reasoning_effort=ultra']);
+  });
+
+  it('rejects values that are unsafe for argv', () => {
+    expect(() => buildCodexArgs({ model: 'gpt-5.5 && cat /etc/passwd' })).toThrow(/Invalid codex model/);
+    expect(() => buildCodexArgs({ effort: 'high"' })).toThrow(/Invalid codex effort/);
   });
 });

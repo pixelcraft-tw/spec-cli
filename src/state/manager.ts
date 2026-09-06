@@ -7,6 +7,7 @@ import {
   type ProjectConfig,
   PHASE_GUARDS,
   PHASES,
+  REVIEW_MODES,
   TASK_STATUSES,
 } from './types.js';
 
@@ -106,6 +107,12 @@ export class StateManager {
           );
         }
       });
+      if (f.review != null && !REVIEW_MODES.includes(f.review?.mode)) {
+        throw this._corruptState(
+          `feature "${f.feature}" has unknown review mode "${f.review?.mode}" ` +
+            `(valid: ${REVIEW_MODES.join(', ')})`
+        );
+      }
     });
     return data as WorkflowState;
   }
@@ -173,6 +180,14 @@ export class StateManager {
       git: { convention: 'conventional', ...data.git },
       backend: { default: 'claude', ...data.backend },
       test: { strategy: 'none', type: 'unit', ...data.test },
+      // One level deeper than the other sections so a partial `review:`
+      // block keeps the agent/codex sub-defaults
+      review: {
+        mode: 'agent',
+        ...data.review,
+        agent: { model: '', effort: '', ...data.review?.agent },
+        codex: { model: '', effort: '', ...data.review?.codex },
+      },
     };
   }
 

@@ -15,3 +15,15 @@ backend:
 test:
   strategy: none
   type: unit
+
+# Independent code reviewer (never the session that wrote the code).
+# Per-feature overrides are chosen by `pxs new` and stored in state.yaml;
+# CLI flags --review-mode / --review-model / --review-effort override both.
+review:
+  mode: agent            # agent = isolated Claude Code reviewer | codex = OpenAI Codex CLI
+  agent:
+    model: ""            # claude alias/id (fable | opus | sonnet | ...); empty = CLI default
+    effort: ""           # low | medium | high | xhigh | max; empty = CLI default
+  codex:
+    model: ""            # codex model id (gpt-5.5, ...); empty = ~/.codex/config.toml default
+    effort: ""           # low | medium | high | xhigh (model-dependent); empty = default

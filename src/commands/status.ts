@@ -45,6 +45,12 @@ export async function statusCommand(name?: string): Promise<void> {
     console.log(`  Type:    ${feature.type}`);
     console.log(`  Branch:  ${feature.branch || '-'}`);
     console.log(`  Phase:   ${feature.phase}`);
+    if (feature.review) {
+      const r = feature.review;
+      console.log(
+        `  Review:  ${r.mode}${r.model ? ' · ' + r.model : ''}${r.effort ? ' · effort ' + r.effort : ''}`
+      );
+    }
     if (feature.session) {
       console.log(`  Backend: ${feature.session.backend}`);
       console.log(`  Session: ${feature.session.id}`);

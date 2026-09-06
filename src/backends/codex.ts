@@ -3,6 +3,37 @@ import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
+/**
+ * Reasoning levels commonly supported by codex models. Newer models add
+ * levels (e.g. `max`, `ultra`), so this list drives prompts and warnings —
+ * it is not a hard reject; the CLI has the final say.
+ */
+export const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const SAFE_ARG_VALUE = /^[A-Za-z0-9._:-]+$/;
+
+/**
+ * Extra argv for model / effort / read-only runs. Values are validated
+ * because they enter argv (shell mode on win32). Exported for unit tests.
+ */
+export function buildCodexArgs(opts?: ExecuteOptions): string[] {
+  const args: string[] = [];
+  if (opts?.model) {
+    if (!SAFE_ARG_VALUE.test(opts.model)) throw new Error(`Invalid codex model: "${opts.model}"`);
+    args.push('-m', opts.model);
+  }
+  if (opts?.effort) {
+    if (!SAFE_ARG_VALUE.test(opts.effort)) throw new Error(`Invalid codex effort: "${opts.effort}"`);
+    // Bare value on purpose: codex keeps a non-TOML value as a string
+    // literal, and no quotes means cmd.exe cannot strip them on win32.
+    args.push('-c', `model_reasoning_effort=${opts.effort}`);
+  }
+  if (opts?.readOnly) {
+    // OS-level sandbox: the reviewer cannot write anywhere in the worktree.
+    args.push('-s', 'read-only');
+  }
+  return args;
+}
+
 export interface CodexJsonSummary {
   output: string;
   sessionId: string;
@@ -75,7 +106,7 @@ export class CodexBackend implements AIBackend {
 
   async execute(prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
     // `-` = read the prompt from stdin
-    return this._run(['codex', 'exec', '--json', '-'], prompt, opts);
+    return this._run(['codex', 'exec', '--json', ...buildCodexArgs(opts), '-'], prompt, opts);
   }
 
   async resume(sessionId: string, prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
@@ -84,7 +115,11 @@ export class CodexBackend implements AIBackend {
     if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
       throw new Error(`Invalid session id: "${sessionId}"`);
     }
-    return this._run(['codex', 'exec', 'resume', '--json', sessionId, '-'], prompt, opts);
+    return this._run(
+      ['codex', 'exec', 'resume', '--json', ...buildCodexArgs(opts), sessionId, '-'],
+      prompt,
+      opts
+    );
   }
 
   private _run(args: string[], prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {

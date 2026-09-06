@@ -9,16 +9,22 @@ vi.mock('../../src/git/operations.js', () => ({
   gitDiffBranch: vi.fn().mockReturnValue('branch diff'),
 }));
 
-// Mock backend
+// Mock backends — keyed by name so the codex reviewer can be told apart
 const mockBackend = {
   name: 'claude',
   isAvailable: vi.fn().mockResolvedValue(true),
   execute: vi.fn().mockResolvedValue({ output: '## Final Review\nPASS', sessionId: 'rev-1', exitCode: 0 }),
   resume: vi.fn(),
 };
+const mockCodex = {
+  name: 'codex',
+  isAvailable: vi.fn().mockResolvedValue(true),
+  execute: vi.fn().mockResolvedValue({ output: '## Final Review\nFinal verdict: PASS', sessionId: 'codex-1', exitCode: 0 }),
+  resume: vi.fn(),
+};
 
 vi.mock('../../src/backends/factory.js', () => ({
-  createBackend: () => mockBackend,
+  createBackend: (name: string) => (name === 'codex' ? mockCodex : mockBackend),
 }));
 
 describe('pxs review', () => {
@@ -147,5 +153,42 @@ describe('pxs review', () => {
     const finalReviewPath = path.join(tmpDir, '.workflow', 'reviews', 'my-feat-final.md');
     expect(fs.existsSync(finalReviewPath)).toBe(true);
     expect(fs.readFileSync(finalReviewPath, 'utf-8')).toContain('PASS');
+  });
+
+  it('--run --review-mode codex uses the codex reviewer read-only', async () => {
+    mockBackend.execute.mockClear();
+    mockCodex.execute.mockClear();
+    fs.mkdirSync(path.join(tmpDir, '.workflow', 'prompts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.workflow', 'prompts', 'final-review.md'),
+      'Final review:\n{branch_diff}\n{spec_content}\n{plan_content}\n{docs_content}'
+    );
+    seedFeature('completed', [{ name: 'task-1', status: 'complete' }]);
+
+    const { reviewCommand } = await import('../../src/commands/review.js');
+    await reviewCommand('my-feat', { run: true, reviewMode: 'codex', reviewEffort: 'high' });
+
+    expect(mockBackend.execute).not.toHaveBeenCalled();
+    expect(mockCodex.execute).toHaveBeenCalledTimes(1);
+    expect(mockCodex.execute.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ readOnly: true, effort: 'high' })
+    );
+    expect(mockCodex.resume).not.toHaveBeenCalled();
+
+    const finalReviewPath = path.join(tmpDir, '.workflow', 'reviews', 'my-feat-final.md');
+    expect(fs.readFileSync(finalReviewPath, 'utf-8')).toContain('Final verdict: PASS');
+  });
+
+  it('--run fails fast when the chosen reviewer CLI is missing', async () => {
+    mockCodex.isAvailable.mockResolvedValueOnce(false);
+    mockCodex.execute.mockClear();
+    seedFeature('completed', [{ name: 'task-1', status: 'complete' }]);
+
+    const { reviewCommand } = await import('../../src/commands/review.js');
+    await reviewCommand('my-feat', { run: true, reviewMode: 'codex' });
+
+    expect(process.exitCode).toBe(1);
+    expect(mockCodex.execute).not.toHaveBeenCalled();
+    process.exitCode = 0;
   });
 });

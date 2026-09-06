@@ -1,14 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { StateManager } from '../state/manager.js';
-import { createBackend } from '../backends/factory.js';
-import { runExpertReview, loadDocs } from '../utils/review.js';
+import {
+  runExpertReview,
+  loadDocs,
+  resolveReviewer,
+  ensureReviewerAvailable,
+  describeReviewer,
+  type ReviewFlags,
+} from '../utils/review.js';
 import { gitDiffBranch } from '../git/operations.js';
 import * as display from '../utils/display.js';
 
 export async function reviewCommand(
   name: string,
-  options: { step?: number; summary?: boolean; run?: boolean; backend?: string; docs?: string[] }
+  options: { step?: number; summary?: boolean; run?: boolean; docs?: string[] } & ReviewFlags
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -23,12 +29,8 @@ export async function reviewCommand(
   // Re-run an independent expert review on demand (no re-implementation).
   if (options.run) {
     const config = state.readConfig();
-    const backendName = options.backend ?? config.backend.default;
-    const backend = createBackend(backendName);
-    if (!(await backend.isAvailable())) {
-      display.error(`Backend "${backendName}" not available.`);
-      return;
-    }
+    const reviewer = resolveReviewer(config.review, feature.review, options);
+    if (!(await ensureReviewerAvailable(reviewer))) return;
 
     const baseBranch = feature.base_branch || 'main';
     const specContent = fs.existsSync(state.specPath(name))
@@ -38,9 +40,9 @@ export async function reviewCommand(
       ? fs.readFileSync(state.planPath(name), 'utf-8')
       : '(plan not found)';
 
-    display.info('Running independent expert review (spec & document conformance)...');
+    display.info(`Running independent expert review (${describeReviewer(reviewer)}; spec & document conformance)...`);
     const review = await runExpertReview({
-      backend,
+      ...reviewer,
       templateName: 'final-review',
       vars: {
         branch_diff: gitDiffBranch(baseBranch),

@@ -29,16 +29,23 @@ vi.mock('../../src/git/operations.js', () => ({
   gitStatus: vi.fn(),
 }));
 
-// Mock backend
+// Mock backends — keyed by name so the implementer (claude) and an
+// independent codex reviewer can be told apart
 const mockBackend = {
   name: 'claude',
   isAvailable: vi.fn(),
   execute: vi.fn(),
   resume: vi.fn(),
 };
+const mockCodex = {
+  name: 'codex',
+  isAvailable: vi.fn(),
+  execute: vi.fn(),
+  resume: vi.fn(),
+};
 
 vi.mock('../../src/backends/factory.js', () => ({
-  createBackend: () => mockBackend,
+  createBackend: (name: string) => (name === 'codex' ? mockCodex : mockBackend),
 }));
 
 const okResult = (output: string, sessionId: string) => ({
@@ -65,6 +72,9 @@ describe('pxs implement', () => {
     mockBackend.isAvailable.mockReset().mockResolvedValue(true);
     mockBackend.execute.mockReset().mockResolvedValue(okResult('implementation output', 'sess-1'));
     mockBackend.resume.mockReset().mockResolvedValue(okResult('## Review\nLooks good!', 'sess-2'));
+    mockCodex.isAvailable.mockReset().mockResolvedValue(true);
+    mockCodex.execute.mockReset().mockResolvedValue(okResult('## Review\nFinal verdict: PASS', 'codex-1'));
+    mockCodex.resume.mockReset();
 
     vi.mocked(git.gitCurrentBranch).mockReset().mockReturnValue('develop');
     vi.mocked(git.gitDiff).mockReset().mockReturnValue('diff output');
@@ -384,5 +394,116 @@ describe('pxs implement', () => {
 
     const mgr = new StateManager(tmpDir);
     expect(mgr.getFeature('addtest-test')!.tasks[0].status).toBe('complete');
+  });
+
+  it('reviews in a read-only session while the implementer keeps write access', async () => {
+    seedReady('readonly-test');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('readonly-test', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    const [implementCall, reviewCall] = mockBackend.execute.mock.calls;
+    expect(implementCall[0]).toContain('Implement:');
+    expect(implementCall[1]).not.toHaveProperty('readOnly');
+    expect(reviewCall[0]).toContain('Review:');
+    expect(reviewCall[1]).toEqual(expect.objectContaining({ readOnly: true }));
+  });
+
+  it('--review-mode codex reviews on codex while implementing on claude', async () => {
+    seedReady('codex-review');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand(
+      'codex-review',
+      { agents: [], skills: [], text: '' },
+      { skipReview: true, reviewMode: 'codex' }
+    );
+
+    // Implementer: claude only. Reviewer: codex, fresh + read-only, never resumed.
+    expect(mockBackend.execute).toHaveBeenCalledTimes(1);
+    expect(mockCodex.execute).toHaveBeenCalledTimes(1);
+    expect(mockCodex.execute.mock.calls[0][1]).toEqual(expect.objectContaining({ readOnly: true }));
+    expect(mockCodex.resume).not.toHaveBeenCalled();
+
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('codex-review')!;
+    expect(feature.session?.backend).toBe('claude');
+    expect(feature.tasks[0].status).toBe('complete');
+    const review = fs.readFileSync(path.join(tmpDir, '.workflow', 'reviews', 'codex-review-task-1.md'), 'utf-8');
+    expect(review).toContain('Final verdict: PASS');
+  });
+
+  it('passes --review-model and --review-effort to the reviewer only', async () => {
+    seedReady('flags-test');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand(
+      'flags-test',
+      { agents: [], skills: [], text: '' },
+      { skipReview: true, reviewMode: 'codex', reviewModel: 'gpt-5.5', reviewEffort: 'high' }
+    );
+
+    expect(mockCodex.execute.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ model: 'gpt-5.5', effort: 'high', readOnly: true })
+    );
+    expect(mockBackend.execute.mock.calls[0][1]).not.toHaveProperty('model');
+  });
+
+  it('honors the per-feature reviewer choice recorded by pxs new', async () => {
+    seedReady('feature-choice');
+    const mgr = new StateManager(tmpDir);
+    const seeded = mgr.getFeature('feature-choice')!;
+    seeded.review = { mode: 'codex', effort: 'xhigh' };
+    mgr.upsertFeature(seeded);
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('feature-choice', { agents: [], skills: [], text: '' }, { skipReview: true });
+
+    expect(mockCodex.execute).toHaveBeenCalledTimes(1);
+    expect(mockCodex.execute.mock.calls[0][1]).toEqual(expect.objectContaining({ effort: 'xhigh' }));
+  });
+
+  it('aborts before implementing when the reviewer backend is unavailable', async () => {
+    seedReady('no-codex');
+    mockCodex.isAvailable.mockResolvedValue(false);
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('no-codex', { agents: [], skills: [], text: '' }, { reviewMode: 'codex' });
+
+    expect(process.exitCode).toBe(1);
+    expect(mockBackend.execute).not.toHaveBeenCalled();
+    expect(git.gitBranch).not.toHaveBeenCalled();
+    const mgr = new StateManager(tmpDir);
+    expect(mgr.getFeature('no-codex')!.phase).toBe('ready_to_implement');
+  });
+
+  it('rejects an unknown review mode before any AI run', async () => {
+    seedReady('bad-mode');
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await expect(
+      implementCommand('bad-mode', { agents: [], skills: [], text: '' }, { reviewMode: 'gemini' })
+    ).rejects.toThrow(/valid: agent, codex/);
+    expect(mockBackend.execute).not.toHaveBeenCalled();
+  });
+
+  it('--yes stops with exit 1 when the reviewer returns NEEDS_CHANGES', async () => {
+    seedReady('needs-changes');
+    mockBackend.execute
+      .mockResolvedValueOnce(okResult('implementation output', 'sess-1'))
+      .mockResolvedValueOnce(okResult('Critical: missing null check\nFinal verdict: NEEDS_CHANGES', 'rev-1'));
+    vi.mocked(inquirer.prompt).mockRejectedValue(new Error('must not prompt in --yes mode'));
+
+    const { implementCommand } = await import('../../src/commands/implement.js');
+    await implementCommand('needs-changes', { agents: [], skills: [], text: '' }, { yes: true });
+
+    expect(process.exitCode).toBe(1);
+    expect(git.gitMerge).not.toHaveBeenCalled();
+    const mgr = new StateManager(tmpDir);
+    const feature = mgr.getFeature('needs-changes')!;
+    expect(feature.tasks[0].status).toBe('review_pending');
+    expect(feature.phase).toBe('implementing');
+    const review = fs.readFileSync(path.join(tmpDir, '.workflow', 'reviews', 'needs-changes-task-1.md'), 'utf-8');
+    expect(review).toContain('NEEDS_CHANGES');
   });
 });

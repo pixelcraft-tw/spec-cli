@@ -6,6 +6,12 @@ export interface ExecuteOptions {
    * runs show live progress instead of minutes of silence.
    */
   onEvent?: (event: Record<string, unknown>) => void;
+  /** Model override handed to the CLI (claude alias/id, or codex model id). */
+  model?: string;
+  /** Effort / reasoning level; accepted values are CLI- and model-specific. */
+  effort?: string;
+  /** Forbid file edits — used for independent reviewer runs. */
+  readOnly?: boolean;
 }
 
 export interface ExecuteResult {

@@ -6,7 +6,14 @@ import { createBackend } from '../backends/factory.js';
 import { runPrompt } from '../backends/run.js';
 import { parsePlan } from '../parsers/plan.js';
 import { assemblePrompt } from '../utils/prompt.js';
-import { runExpertReview, loadDocs } from '../utils/review.js';
+import {
+  runExpertReview,
+  loadDocs,
+  resolveReviewer,
+  ensureReviewerAvailable,
+  describeReviewer,
+  type ReviewFlags,
+} from '../utils/review.js';
 import {
   gitBranch,
   gitCheckout,
@@ -33,7 +40,7 @@ export async function implementCommand(
     skipReview?: boolean;
     docs?: string[];
     yes?: boolean;
-  }
+  } & ReviewFlags
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -49,6 +56,11 @@ export async function implementCommand(
     display.error(`Backend "${backendName}" not available.`);
     return;
   }
+
+  // Independent reviewer: resolved and checked up front so a missing CLI or
+  // a bad value fails here — before any branch is created or AI run starts.
+  const reviewer = resolveReviewer(config.review, feature.review, options);
+  if (!(await ensureReviewerAvailable(reviewer))) return;
 
   if (!autoYes && !process.stdout.isTTY) {
     display.warn('Not running in a TTY — interactive prompts may fail. Use --yes for non-interactive runs.');
@@ -212,13 +224,13 @@ export async function implementCommand(
     // Review + decision loop. add-test and request-change both loop back
     // into a fresh independent review instead of silently completing.
     reviewLoop: while (true) {
-      // Independent AI review — runs in a FRESH session (not the implementer's),
-      // so the reviewer is not grading its own work. Its session is discarded and
-      // must not overwrite `sessionId`, which keeps the implementer context for the
-      // next task.
-      display.info('Running independent AI review...');
+      // Independent AI review — runs on the reviewer's own backend in a FRESH,
+      // read-only session (never the implementer's), so the reviewer is not
+      // grading its own work. Its session is discarded and must not overwrite
+      // `sessionId`, which keeps the implementer context for the next task.
+      display.info(`Running independent AI review (${describeReviewer(reviewer)})...`);
       const review = await runExpertReview({
-        backend,
+        ...reviewer,
         templateName: 'review',
         vars: {
           git_diff: taskDiff.trim() ? taskDiff : '(the backend produced no changes on this attempt)',
@@ -228,6 +240,7 @@ export async function implementCommand(
         agents: args.agents,
         skills: args.skills,
         log: { dir: logsDir, label: `${name}-task-${i + 1}-review` },
+        onEvent,
       });
       state.recordUsage(feature, review);
       const reviewOutput = review.output;
@@ -243,6 +256,16 @@ export async function implementCommand(
 
       let choice: string;
       if (autoYes) {
+        // Non-interactive runs must not rubber-stamp a failing verdict. The
+        // task stays review_pending (review saved) and the next interactive
+        // run re-enters review directly.
+        if (/\bNEEDS_CHANGES\b/.test(reviewOutput)) {
+          display.error(
+            `--yes: independent reviewer returned NEEDS_CHANGES for task ${i + 1}. ` +
+              'Re-run interactively to decide.'
+          );
+          return;
+        }
         display.info('--yes: auto-approving task.');
         choice = 'approve';
       } else {
@@ -364,10 +387,11 @@ export async function implementCommand(
     }
 
     // Final branch code review — independent expert that verifies the whole
-    // branch against the spec and any developer-provided documents. Runs in a
-    // fresh session (not the implementer's) to avoid self-review bias.
+    // branch against the spec and any developer-provided documents. Runs on
+    // the reviewer's backend in a fresh, read-only session (not the
+    // implementer's) to avoid self-review bias.
     if (!options.skipReview) {
-      display.info('Running independent final review (spec & document conformance)...');
+      display.info(`Running independent final review (${describeReviewer(reviewer)}; spec & document conformance)...`);
       try {
         const branchDiff = gitDiffBranch(baseBranch);
         const specContent = fs.existsSync(state.specPath(name))
@@ -375,7 +399,7 @@ export async function implementCommand(
           : '(spec not found)';
 
         const finalReview = await runExpertReview({
-          backend,
+          ...reviewer,
           templateName: 'final-review',
           vars: {
             branch_diff: branchDiff,
@@ -387,6 +411,7 @@ export async function implementCommand(
           skills: args.skills,
           extraText: args.text,
           log: { dir: logsDir, label: `${name}-final-review` },
+          onEvent,
         });
         state.recordUsage(feature, finalReview);
 

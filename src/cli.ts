@@ -38,6 +38,9 @@ export function createProgram(): Command {
     .option('--desc <text>', 'Generate spec from text description')
     .option('--jira <tickets...>', 'Import from Jira tickets')
     .option('-i, --interactive', 'Interactive Q&A mode')
+    .option('--review-mode <mode>', 'Independent reviewer for this feature: agent | codex (skips the prompt)')
+    .option('--review-model <model>', 'Reviewer model (claude alias/id, or codex model id)')
+    .option('--review-effort <level>', 'Reviewer effort (claude: low|medium|high|xhigh|max · codex: low|medium|high|xhigh|...)')
     .action(newCommand);
 
   program
@@ -69,9 +72,12 @@ export function createProgram(): Command {
     .option('--test [types...]', 'Test strategy')
     .option('--skip-review', 'Skip final branch code review')
     .option('--docs <paths...>', 'Reference documents fed to the reviewer (put last)')
-    .option('--yes', 'Non-interactive: auto-approve reviews, keep branch (for CI/automation)')
+    .option('--yes', 'Non-interactive: auto-approve PASS reviews, stop on NEEDS_CHANGES, keep branch (for CI/automation)')
+    .option('--review-mode <mode>', 'Independent reviewer: agent (isolated Claude Code) | codex (OpenAI Codex CLI)')
+    .option('--review-model <model>', 'Reviewer model (claude alias/id, or codex model id)')
+    .option('--review-effort <level>', 'Reviewer effort (claude: low|medium|high|xhigh|max · codex: low|medium|high|xhigh|...)')
     .allowUnknownOption()
-    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[]; yes?: boolean }, cmd: Command) => {
+    .action((name: string, options: { backend?: string; test?: string[] | boolean; skipReview?: boolean; docs?: string[]; yes?: boolean; reviewMode?: string; reviewModel?: string; reviewEffort?: string }, cmd: Command) => {
       const rawArgs = cmd.args ?? [];
       const parsed = parseArgs(rawArgs);
       return implementCommand(name, parsed, options);
@@ -83,10 +89,12 @@ export function createProgram(): Command {
     .option('--step <n>', 'View specific task review', parseInt)
     .option('--summary', 'Summary overview of all tasks')
     .option('--run', 'Re-run an independent expert review (spec & document conformance) now')
-    .option('--backend <name>', 'AI backend for --run (claude | codex)')
+    .option('--review-mode <mode>', 'Reviewer for --run: agent (isolated Claude Code) | codex (OpenAI Codex CLI)')
+    .option('--review-model <model>', 'Reviewer model for --run (claude alias/id, or codex model id)')
+    .option('--review-effort <level>', 'Reviewer effort for --run (claude: low|medium|high|xhigh|max · codex: low|medium|high|xhigh|...)')
     .option('--docs <paths...>', 'Reference documents fed to the reviewer (put last)')
     .allowUnknownOption()
-    .action((name: string, options: { step?: number; summary?: boolean; run?: boolean; backend?: string; docs?: string[] }) => {
+    .action((name: string, options: { step?: number; summary?: boolean; run?: boolean; docs?: string[]; reviewMode?: string; reviewModel?: string; reviewEffort?: string }) => {
       return reviewCommand(name, options);
     });
 

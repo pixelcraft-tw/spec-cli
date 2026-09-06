@@ -3,6 +3,33 @@ import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
+/** Effort levels documented by `claude --help`; used for prompts and warnings. */
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const READ_ONLY_DISALLOWED_TOOLS = 'Edit,Write,MultiEdit,NotebookEdit';
+const SAFE_ARG_VALUE = /^[A-Za-z0-9._:-]+$/;
+
+/**
+ * Extra argv for model / effort / read-only runs. Values are validated
+ * because they enter argv (shell mode on win32). Exported for unit tests.
+ */
+export function buildClaudeArgs(opts?: ExecuteOptions): string[] {
+  const args: string[] = [];
+  if (opts?.model) {
+    if (!SAFE_ARG_VALUE.test(opts.model)) throw new Error(`Invalid claude model: "${opts.model}"`);
+    args.push('--model', opts.model);
+  }
+  if (opts?.effort) {
+    if (!SAFE_ARG_VALUE.test(opts.effort)) throw new Error(`Invalid claude effort: "${opts.effort}"`);
+    args.push('--effort', opts.effort);
+  }
+  if (opts?.readOnly) {
+    // Hard gate against the editor tools. Bash stays available so a reviewer
+    // can run git and tests — writing through the shell is a known gap.
+    args.push('--disallowedTools', READ_ONLY_DISALLOWED_TOOLS);
+  }
+  return args;
+}
+
 export interface StreamJsonSummary {
   output: string;
   sessionId: string;
@@ -62,7 +89,11 @@ export class ClaudeBackend implements AIBackend {
 
   async execute(prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
     // --verbose is required for stream-json in print mode
-    return this._run(['claude', '-p', '--output-format', 'stream-json', '--verbose'], prompt, opts);
+    return this._run(
+      ['claude', '-p', '--output-format', 'stream-json', '--verbose', ...buildClaudeArgs(opts)],
+      prompt,
+      opts
+    );
   }
 
   async resume(sessionId: string, prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
@@ -72,7 +103,7 @@ export class ClaudeBackend implements AIBackend {
       throw new Error(`Invalid session id: "${sessionId}"`);
     }
     return this._run(
-      ['claude', '-p', '--resume', sessionId, '--output-format', 'stream-json', '--verbose'],
+      ['claude', '-p', '--resume', sessionId, '--output-format', 'stream-json', '--verbose', ...buildClaudeArgs(opts)],
       prompt,
       opts
     );
