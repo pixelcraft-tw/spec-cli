@@ -70,6 +70,7 @@ export async function initCommand(options: { force?: boolean; arch?: string; lan
     '.workflow/plans',
     '.workflow/reviews',
     '.claude/commands',
+    '.claude/agents',
   ];
   for (const dir of dirs) {
     fs.mkdirSync(path.join(cwd, dir), { recursive: true });
@@ -143,6 +144,9 @@ export async function initCommand(options: { force?: boolean; arch?: string; lan
     }
   }
 
+  // Copy the independent reviewer agent used by the slash commands' agent mode
+  copyDir(path.join(TEMPLATES_DIR, 'claude-agents'), path.join(cwd, '.claude', 'agents'));
+
   // Append to AGENTS.md
   const agentsSnippetPath = path.join(TEMPLATES_DIR, 'agents-md-snippet.md');
   if (fs.existsSync(agentsSnippetPath)) {
@@ -160,6 +164,7 @@ export async function initCommand(options: { force?: boolean; arch?: string; lan
 
   display.success('Created .workflow/ directory structure');
   display.success('Created .claude/commands/pxs.*.md slash commands');
+  display.success('Created .claude/agents/pxs-reviewer.md (independent reviewer)');
   display.success('Created AGENTS.md');
   display.info('Run `pxs new <name>` to create your first spec.');
 }

@@ -208,3 +208,39 @@ describe('pxs init', () => {
     expect(config).toContain('lang_framework: "typescript-nestjs"');
   });
 });
+
+describe('pxs init (independent reviewer)', () => {
+  let tmpDir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxs-init-review-'));
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-project' }));
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('installs the read-only reviewer agent and the review config block', async () => {
+    const { initCommand } = await import('../../src/commands/init.js');
+    await initCommand({});
+
+    const agentPath = path.join(tmpDir, '.claude', 'agents', 'pxs-reviewer.md');
+    expect(fs.existsSync(agentPath)).toBe(true);
+    const agent = fs.readFileSync(agentPath, 'utf-8');
+    expect(agent).toContain('name: pxs-reviewer');
+    expect(agent).toContain('disallowedTools: Edit, Write, MultiEdit, NotebookEdit');
+
+    const config = fs.readFileSync(path.join(tmpDir, '.workflow', 'config.yaml'), 'utf-8');
+    expect(config).toContain('review:');
+    expect(config).toContain('mode: agent');
+
+    const implement = fs.readFileSync(path.join(tmpDir, '.claude', 'commands', 'pxs.implement.md'), 'utf-8');
+    expect(implement).toContain('pxs-reviewer');
+    expect(implement).toContain('codex exec');
+  });
+});

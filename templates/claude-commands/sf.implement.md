@@ -6,11 +6,32 @@ Parse $ARGUMENTS:
 - First word not starting with @, /, or -- is <name>
 - --backend claude|codex
 - --test [tdd] [intg]: test strategy
+- --review-mode agent|codex, --review-model <model>, --review-effort <level>: override the independent reviewer for this run
 - @ prefixed = agent, / prefixed = skill
 - Remaining = supplementary instructions
 
 Read `.workflow/state.yaml` to confirm current status.
 Read `.workflow/plans/<name>.md` to get task list.
+
+## Independent Reviewer (applies to every review below)
+
+<HARD-GATE>
+You are the implementer. You MUST NOT review your own work in this session — every task review and the final review is produced by an isolated reviewer that receives only a rendered prompt. Never summarize, soften, or re-grade its output.
+</HARD-GATE>
+
+Resolve the reviewer once — precedence: `--review-*` flags > the feature's `review:` block in `.workflow/state.yaml` > `review:` in `.workflow/config.yaml` (default mode `agent`).
+
+Dispatch a rendered review prompt like this:
+- **mode `agent`**: call the Agent tool with `subagent_type: "pxs-reviewer"` and `prompt` = the rendered prompt only (no conversation history, no summary of what you did). Pass `model` when a reviewer model is resolved. (Effort for this subagent is set in `.claude/agents/pxs-reviewer.md` frontmatter.)
+- **mode `codex`**: write the rendered prompt to `.workflow/logs/<prompt-file>.md`, then run via Bash:
+  ```bash
+  codex exec -s read-only --ephemeral --skip-git-repo-check \
+    [-m <model>] [-c model_reasoning_effort=<effort>] \
+    -o <review-file> - < .workflow/logs/<prompt-file>.md
+  ```
+  If `codex` is not installed, stop and tell the user — do not fall back to reviewing it yourself.
+
+Rendering a prompt = take the template from `.workflow/prompts/`, replace each `{placeholder}`, and append `.workflow/architecture.md` under `## Architecture Constraint` if it exists, plus any `@agent` / `/skill` instructions from $ARGUMENTS.
 
 ## Pre-flight
 If first run (phase = ready_to_implement):
@@ -20,6 +41,7 @@ If first run (phase = ready_to_implement):
 ## Execution Loop
 For the next pending task:
 
+0. Record the task anchor: `git rev-parse HEAD`. Everything the task commits is `<anchor>..HEAD` — that range is what the reviewer receives
 1. Read the task spec
 2. First scan codebase to understand relevant existing modules, design patterns, utility functions
 3. Prioritize reusing existing code; implement with minimal changes (don't over-engineer)
@@ -42,11 +64,10 @@ For the next pending task:
   - `git add -A && git commit -m "test(<name>): task-N <title>"`
 - No --test: don't generate tests
 
-### AI Review
-1. Extract git diff for this task
-2. Review against task spec
-3. Label issues by severity (Critical / Warning / Info)
-4. Save review to `.workflow/reviews/<name>-task-N.md`
+### AI Review (independent — never in this session)
+1. Render `.workflow/prompts/review.md`: `{git_diff}` = `git diff <anchor>..HEAD`, `{task_content}` = the task spec, `{docs_content}` = any `--docs` files (or `(none provided)`)
+2. Dispatch it to the independent reviewer (see above) with prompt file `<name>-task-N-review-prompt` and review file `.workflow/reviews/<name>-task-N.md`
+3. Save the reviewer's output verbatim to `.workflow/reviews/<name>-task-N.md` (the codex command already writes it)
 
 ### Present to User
 - Changed file list
@@ -63,15 +84,13 @@ For the next pending task:
 ### All Tasks Complete
 Present task summary.
 
-#### Final Code Review
+#### Final Code Review (independent — never in this session)
 Before presenting merge options (skip if `--skip-review` was passed):
 1. Get full branch diff: `git diff $(git merge-base <base-branch> HEAD)..HEAD` (base branch from state.yaml `base_branch` field, fallback to `main`)
-2. Read spec and plan files
-3. Perform **comprehensive code review** of all changes — read and analyze actual code, not just diff stats
-4. If @agents or /skills were specified, involve them in the review
-5. If no agents/skills specified, proactively use available review tools (e.g., /simplify, /code-review, code-reviewer agent)
-6. Save review to `.workflow/reviews/<name>-final.md`
-7. Present review findings to user with severity labels (Critical/Warning/Info) and verdict (PASS/NEEDS_CHANGES)
+2. Render `.workflow/prompts/final-review.md`: `{branch_diff}`, `{spec_content}` = `.workflow/specs/<name>.md`, `{plan_content}` = `.workflow/plans/<name>.md`, `{docs_content}` = any `--docs` files
+3. Dispatch it to the independent reviewer (see above) with prompt file `<name>-final-review-prompt` and review file `.workflow/reviews/<name>-final.md`
+4. Save the output verbatim to `.workflow/reviews/<name>-final.md`
+5. Present the review to the user with severity labels (Critical/Warning/Info) and verdict (PASS/NEEDS_CHANGES)
 
 Options: [merge] [squash-merge] [keep-branch]
 
