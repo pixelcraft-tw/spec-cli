@@ -7,6 +7,7 @@ import { CLAUDE_MODEL_CHOICES, codexModelChoices } from '../discovery/models.js'
 import {
   resolveReviewer,
   describeReviewer,
+  reviewerCliDefaults,
   knownEfforts,
   type ReviewFlags,
 } from '../utils/review.js';
@@ -112,6 +113,16 @@ async function chooseReviewer(
 
   const perMode = mode === 'codex' ? config.codex : config.agent;
   const models = mode === 'codex' ? codexModelChoices() : CLAUDE_MODEL_CHOICES;
+  // Show what "(default)" really means: config.yaml first, then what the
+  // CLI itself would use, so the user always knows which model/effort runs.
+  const cli = mode === 'codex' ? 'codex' : 'claude';
+  const cliDefaults = reviewerCliDefaults(mode);
+  const defaultLabel = (configured: string, fromCli: string | undefined): string =>
+    configured
+      ? `${configured} (config.yaml)`
+      : fromCli
+        ? `${fromCli} (${cliDefaults.source})`
+        : `${cli} CLI default`;
 
   const { model: picked } = (await inquirer.prompt([
     {
@@ -119,7 +130,7 @@ async function chooseReviewer(
       name: 'model',
       message: 'Reviewer model:',
       choices: [
-        { name: `(default${perMode.model ? `: ${perMode.model}` : ''})`, value: '' },
+        { name: `(default: ${defaultLabel(perMode.model, cliDefaults.model)})`, value: '' },
         ...models.map((m) => ({ name: m.label, value: m.id })),
         { name: 'other — type a model id', value: CUSTOM_MODEL },
       ],
@@ -143,7 +154,7 @@ async function chooseReviewer(
       name: 'effort',
       message: 'Reviewer effort:',
       choices: [
-        { name: `(default${perMode.effort ? `: ${perMode.effort}` : ''})`, value: '' },
+        { name: `(default: ${defaultLabel(perMode.effort, cliDefaults.effort)})`, value: '' },
         ...efforts.map((e) => ({ name: e, value: e })),
       ],
     },

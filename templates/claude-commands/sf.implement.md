@@ -21,6 +21,8 @@ You are the implementer. You MUST NOT review your own work in this session — e
 
 Resolve the reviewer once — precedence: `--review-*` flags > the feature's `review:` block in `.workflow/state.yaml` > `review:` in `.workflow/config.yaml` (default mode `agent`).
 
+Before the first task and again before each review, print one line saying exactly which reviewer will run, filling unset values from the CLI's own defaults (`codex`: `model` / `model_reasoning_effort` in `~/.codex/config.toml`; `agent`: "claude default"), e.g. `Reviewer: codex · gpt-5.6-sol (codex default) · effort xhigh (codex default)`.
+
 Dispatch a rendered review prompt like this:
 - **mode `agent`**: call the Agent tool with `subagent_type: "pxs-reviewer"` and `prompt` = the rendered prompt only (no conversation history, no summary of what you did). Pass `model` when a reviewer model is resolved. (Effort for this subagent is set in `.claude/agents/pxs-reviewer.md` frontmatter.)
 - **mode `codex`**: write the rendered prompt to `.workflow/logs/<prompt-file>.md`, then run via Bash:

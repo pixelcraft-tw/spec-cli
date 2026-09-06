@@ -186,15 +186,32 @@ describe('resolveReviewer', () => {
     );
   });
 
-  it('describes the reviewer for progress output', () => {
+  it('describes the reviewer with explicit values as-is', () => {
     const r = resolveReviewer(
       { ...config, mode: 'codex', codex: { model: 'gpt-5.5', effort: 'high' } },
       undefined
     );
-    expect(describeReviewer(r)).toBe('codex · gpt-5.5 · effort high');
-    expect(describeReviewer(resolveReviewer(config, undefined))).toBe('agent');
+    expect(describeReviewer(r, { source: 'x' })).toBe('codex · gpt-5.5 · effort high');
     expect(knownEfforts('agent')).toContain('max');
     expect(knownEfforts('codex')).toContain('xhigh');
+  });
+
+  it('fills unset model/effort from the CLI defaults and says so', () => {
+    const codex = resolveReviewer({ ...config, mode: 'codex' }, undefined);
+    expect(
+      describeReviewer(codex, { model: 'gpt-5.6-sol', effort: 'xhigh', source: '~/.codex/config.toml' })
+    ).toBe('codex · gpt-5.6-sol (codex default) · effort xhigh (codex default)');
+
+    const partial = resolveReviewer({ ...config, mode: 'codex' }, { mode: 'codex', effort: 'low' });
+    expect(describeReviewer(partial, { model: 'gpt-5.6-sol', effort: 'xhigh', source: 's' })).toBe(
+      'codex · gpt-5.6-sol (codex default) · effort low'
+    );
+
+    const agent = resolveReviewer(config, undefined);
+    expect(describeReviewer(agent, { source: 's' })).toBe('agent · claude default model · claude default effort');
+    expect(describeReviewer(agent, { model: 'opus', source: 's' })).toBe(
+      'agent · opus (claude default) · claude default effort'
+    );
   });
 });
 

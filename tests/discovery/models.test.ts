@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { codexModelChoices, CODEX_MODEL_FALLBACK, CLAUDE_MODEL_CHOICES } from '../../src/discovery/models.js';
+import { codexModelChoices, codexDefaults, claudeDefaults, CODEX_MODEL_FALLBACK, CLAUDE_MODEL_CHOICES } from '../../src/discovery/models.js';
 
 describe('codexModelChoices', () => {
   let tmpDir: string;
@@ -59,5 +59,47 @@ describe('codexModelChoices', () => {
 
   it('offers the claude aliases as fixed choices', () => {
     expect(CLAUDE_MODEL_CHOICES.map((c) => c.id)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
+  });
+});
+
+describe('codexDefaults / claudeDefaults', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxs-defaults-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads top-level model and effort from codex config.toml, ignoring tables', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'config.toml'),
+      [
+        'model = "gpt-5.6-sol"',
+        'model_reasoning_effort = "xhigh"',
+        'approvals_reviewer = "user"',
+        '',
+        '[profiles.fast]',
+        'model = "gpt-5.4-mini"',
+        'model_reasoning_effort = "low"',
+      ].join('\n')
+    );
+    const d = codexDefaults(tmpDir);
+    expect(d.model).toBe('gpt-5.6-sol');
+    expect(d.effort).toBe('xhigh');
+    expect(d.source).toBe('~/.codex/config.toml');
+  });
+
+  it('returns only the source when codex config is missing', () => {
+    expect(codexDefaults(tmpDir)).toEqual({ source: '~/.codex/config.toml' });
+  });
+
+  it('reads a pinned model from claude settings.json and nothing else', () => {
+    fs.writeFileSync(path.join(tmpDir, 'settings.json'), JSON.stringify({ model: 'opus', permissions: {} }));
+    expect(claudeDefaults(tmpDir)).toEqual({ model: 'opus', source: '~/.claude/settings.json' });
+    fs.writeFileSync(path.join(tmpDir, 'settings.json'), JSON.stringify({ permissions: {} }));
+    expect(claudeDefaults(tmpDir)).toEqual({ source: '~/.claude/settings.json' });
   });
 });

@@ -61,6 +61,9 @@ export async function implementCommand(
   // a bad value fails here — before any branch is created or AI run starts.
   const reviewer = resolveReviewer(config.review, feature.review, options);
   if (!(await ensureReviewerAvailable(reviewer))) return;
+  // Tell the user up front exactly which model/effort will judge the work
+  const reviewerLabel = describeReviewer(reviewer);
+  display.info(`Reviewer: ${reviewerLabel}`);
 
   if (!autoYes && !process.stdout.isTTY) {
     display.warn('Not running in a TTY — interactive prompts may fail. Use --yes for non-interactive runs.');
@@ -228,7 +231,7 @@ export async function implementCommand(
       // read-only session (never the implementer's), so the reviewer is not
       // grading its own work. Its session is discarded and must not overwrite
       // `sessionId`, which keeps the implementer context for the next task.
-      display.info(`Running independent AI review (${describeReviewer(reviewer)})...`);
+      display.info(`Running independent AI review (${reviewerLabel})...`);
       const review = await runExpertReview({
         ...reviewer,
         templateName: 'review',
@@ -391,7 +394,7 @@ export async function implementCommand(
     // the reviewer's backend in a fresh, read-only session (not the
     // implementer's) to avoid self-review bias.
     if (!options.skipReview) {
-      display.info(`Running independent final review (${describeReviewer(reviewer)}; spec & document conformance)...`);
+      display.info(`Running independent final review (${reviewerLabel}; spec & document conformance)...`);
       try {
         const branchDiff = gitDiffBranch(baseBranch);
         const specContent = fs.existsSync(state.specPath(name))

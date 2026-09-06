@@ -64,3 +64,53 @@ export function codexModelChoices(codexHome: string = defaultCodexHome()): Model
     return CODEX_MODEL_FALLBACK;
   }
 }
+
+/** What a CLI will use when pxs passes no model/effort — for display only. */
+export interface CliDefaults {
+  model?: string;
+  effort?: string;
+  /** Where the values were read from, for the user's benefit. */
+  source: string;
+}
+
+/**
+ * Top-level `model` / `model_reasoning_effort` from `$CODEX_HOME/config.toml`,
+ * i.e. what `codex exec` uses when pxs passes neither `-m` nor an effort.
+ * Only keys before the first `[table]` count (profiles and projects have
+ * their own). Missing or unreadable config → codex built-in defaults, which
+ * we cannot see.
+ */
+export function codexDefaults(codexHome: string = defaultCodexHome()): CliDefaults {
+  const out: CliDefaults = { source: '~/.codex/config.toml' };
+  try {
+    const raw = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf-8');
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('[')) break;
+      const m = /^(model|model_reasoning_effort)\s*=\s*"([^"]*)"/.exec(t);
+      if (!m || !m[2]) continue;
+      if (m[1] === 'model') out.model = m[2];
+      else out.effort = m[2];
+    }
+  } catch {
+    // no config file: codex falls back to its built-in defaults
+  }
+  return out;
+}
+
+/**
+ * `model` from `~/.claude/settings.json` when the user pinned one. Claude
+ * Code has no user-level effort setting we can read, so effort stays unknown.
+ */
+export function claudeDefaults(
+  claudeHome: string = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude')
+): CliDefaults {
+  const out: CliDefaults = { source: '~/.claude/settings.json' };
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeHome, 'settings.json'), 'utf-8'));
+    if (typeof settings?.model === 'string' && settings.model) out.model = settings.model;
+  } catch {
+    // no settings file: claude uses its built-in default model
+  }
+  return out;
+}

@@ -5,6 +5,7 @@ import { createBackend } from '../backends/factory.js';
 import { CLAUDE_EFFORTS } from '../backends/claude.js';
 import { CODEX_EFFORTS } from '../backends/codex.js';
 import { REVIEW_MODES, type ProjectConfig, type ReviewChoice, type ReviewMode } from '../state/types.js';
+import { claudeDefaults, codexDefaults, type CliDefaults } from '../discovery/models.js';
 import { assemblePrompt } from './prompt.js';
 import * as display from './display.js';
 
@@ -76,12 +77,33 @@ export function resolveReviewer(
   };
 }
 
-/** One-line label for progress output, e.g. "codex · gpt-5.5 · effort high". */
-export function describeReviewer(reviewer: ReviewChoice): string {
-  const parts: string[] = [reviewer.mode];
-  if (reviewer.model) parts.push(reviewer.model);
-  if (reviewer.effort) parts.push(`effort ${reviewer.effort}`);
-  return parts.join(' · ');
+/** Defaults the reviewer's CLI will apply for anything pxs leaves unset. */
+export function reviewerCliDefaults(mode: ReviewMode): CliDefaults {
+  return mode === 'codex' ? codexDefaults() : claudeDefaults();
+}
+
+/**
+ * One-line label that always tells the user which model and effort will
+ * actually run — explicit values as-is, unset ones filled from the CLI's own
+ * config and marked as such. E.g.
+ *   "codex · gpt-5.5 · effort high"
+ *   "codex · gpt-5.6-sol (codex default) · effort xhigh (codex default)"
+ *   "agent · claude default model · claude default effort"
+ */
+export function describeReviewer(reviewer: ReviewChoice, defaults?: CliDefaults): string {
+  const cli = reviewer.mode === 'codex' ? 'codex' : 'claude';
+  const d = defaults ?? reviewerCliDefaults(reviewer.mode);
+  const model = reviewer.model
+    ? reviewer.model
+    : d.model
+      ? `${d.model} (${cli} default)`
+      : `${cli} default model`;
+  const effort = reviewer.effort
+    ? `effort ${reviewer.effort}`
+    : d.effort
+      ? `effort ${d.effort} (${cli} default)`
+      : `${cli} default effort`;
+  return `${reviewer.mode} · ${model} · ${effort}`;
 }
 
 /**

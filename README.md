@@ -178,6 +178,7 @@ review:
 ```
 
 Notes / 注意：
+- pxs always tells you which reviewer will run — when the feature is created and before every review — including values that come from the CLI's own config, e.g. `Reviewer: codex · gpt-5.6-sol (codex default) · effort xhigh (codex default)`. / 建立 feature 時與每次 review 前，pxs 都會印出實際使用的 reviewer、模型與推理強度，含來自 CLI 自身設定的預設值。
 - `codex` mode needs `codex login`; it reports tokens but no USD cost, so the feature's cost total only covers Claude runs. / `codex` 模式需要先 `codex login`；不回報美元成本。
 - pxs drives the `codex` CLI directly rather than the `/codex:review` plugin command, because that command accepts a model but has no effort setting. / pxs 直接呼叫 `codex` CLI，而非 `/codex:review` 外掛指令，因為該指令只能選模型、不能選推理強度。
 - The reviewer CLI is checked before any task is implemented; a missing CLI or an unknown mode fails fast instead of silently falling back to self-review. / reviewer CLI 在實作前就檢查，缺少時直接失敗，不會退回自我 review。

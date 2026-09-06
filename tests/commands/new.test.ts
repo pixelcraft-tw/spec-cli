@@ -26,6 +26,8 @@ vi.mock('../../src/discovery/models.js', async (importOriginal) => {
       { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['low', 'high', 'ultra'] },
       { id: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
     ],
+    codexDefaults: () => ({ model: 'gpt-5.6-sol', effort: 'xhigh', source: '~/.codex/config.toml' }),
+    claudeDefaults: () => ({ source: '~/.claude/settings.json' }),
   };
 });
 
@@ -134,10 +136,11 @@ describe('pxs new (reviewer choice)', () => {
     expect(modeChoices.map((c) => c.value)).toEqual(['agent', 'codex']);
     // Models are picked from a list: default, the CLI's models, then a custom escape hatch
     expect(modelChoices.map((c) => c.value)).toEqual(['', 'gpt-5.6-sol', 'gpt-5.5', '__custom__']);
-    expect(modelChoices[0].name).toBe('(default)');
-    // Effort levels follow the picked model
+    // "(default)" spells out what codex itself would use
+    expect(modelChoices[0].name).toBe('(default: gpt-5.6-sol (~/.codex/config.toml))');
+    // Effort levels follow the picked model; config.yaml wins over the CLI default
     expect(effortChoices.map((c) => c.value)).toEqual(['', 'low', 'high', 'ultra']);
-    expect(effortChoices[0].name).toBe('(default: high)');
+    expect(effortChoices[0].name).toBe('(default: high (config.yaml))');
 
     const feature = new StateManager(tmpDir).getFeature('with-codex')!;
     expect(feature.review).toEqual({ mode: 'codex', model: 'gpt-5.6-sol', effort: 'ultra' });
@@ -154,7 +157,9 @@ describe('pxs new (reviewer choice)', () => {
 
     const [, modelChoices, effortChoices] = promptChoices();
     expect(modelChoices.map((c) => c.value)).toEqual(['', 'fable', 'opus', 'sonnet', 'haiku', '__custom__']);
+    expect(modelChoices[0].name).toBe('(default: claude CLI default)');
     expect(effortChoices.map((c) => c.value)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(effortChoices[0].name).toBe('(default: claude CLI default)');
 
     const feature = new StateManager(tmpDir).getFeature('agent-pick')!;
     expect(feature.review).toEqual({ mode: 'agent', effort: 'xhigh' });
