@@ -18,9 +18,10 @@ npm test         # vitest
 - `src/backends/` — AI backend abstraction (claude, codex) via subprocess
 - `src/state/` — YAML-based workflow state management
 - `src/parsers/` — Argument, spec, and plan parsing
+- `src/discovery/` — Project detection and model choice lists
 - `src/git/` — Git operations wrapper
-- `src/utils/` — Prompt template loading, display formatting
-- `templates/` — Files copied to target project by `pxs init`
+- `src/utils/` — Prompt template loading, display formatting, independent reviewer resolution (`review.ts`)
+- `templates/` — Files copied to target project by `pxs init` (workflow prompts, `claude-commands/`, `claude-agents/`)
 
 ## Conventions
 
@@ -29,3 +30,5 @@ npm test         # vitest
 - Zero API dependency — only spawns CLI subprocesses (claude, codex)
 - State stored in `.workflow/state.yaml` (YAML)
 - Prompt templates in `.workflow/prompts/`
+- Reviews always go through `runExpertReview` on the reviewer's own backend (`review.mode`: `agent` | `codex`), in a fresh read-only session — never the implementer session
+- Codex is spawned as `codex exec --json -` with the prompt on stdin; its JSONL parser (`parseCodexJson`) and the claude one (`parseStreamJson`) are golden-tested
