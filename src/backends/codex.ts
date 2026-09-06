@@ -1,17 +1,72 @@
 import { spawn, execFileSync } from 'node:child_process';
 import type { AIBackend, ExecuteOptions, ExecuteResult } from './interface.js';
 
-// NOTE: the codex backend spawns without a shell and passes the prompt via
-// argv, so it is POSIX-only (on Windows the .cmd shim cannot be spawned
-// directly, and shell mode would be unsafe with an arbitrary prompt in argv).
+const IS_WINDOWS = process.platform === 'win32';
+
+export interface CodexJsonSummary {
+  output: string;
+  sessionId: string;
+  numTurns?: number;
+  /** Error events from the stream — a failed turn can still exit 0. */
+  errors: string[];
+}
+
+/**
+ * Parse `codex exec --json` output (one JSON event per line):
+ *   {"type":"thread.started","thread_id":"…"}
+ *   {"type":"item.completed","item":{"type":"agent_message","text":"…"}}
+ *   {"type":"turn.completed","usage":{…}}
+ *
+ * The LAST agent_message is the authoritative answer — the same semantics as
+ * the CLI's own `--output-last-message` — so interim commentary never leaks
+ * into saved reviews. Exported for golden-file tests: this is the
+ * format-fragile boundary with the codex CLI.
+ */
+export function parseCodexJson(raw: string): CodexJsonSummary {
+  const summary: CodexJsonSummary = { output: '', sessionId: '', errors: [] };
+  let turns = 0;
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(line);
+    } catch {
+      continue; // Not JSON, skip
+    }
+
+    const item = json.item as { type?: string; text?: string } | undefined;
+    switch (json.type) {
+      case 'thread.started':
+        if (typeof json.thread_id === 'string') summary.sessionId = json.thread_id;
+        break;
+      case 'item.completed':
+        if (item?.type === 'agent_message' && typeof item.text === 'string') {
+          summary.output = item.text;
+        }
+        break;
+      case 'turn.completed':
+        turns++;
+        break;
+      case 'turn.failed':
+      case 'error': {
+        const err = json.error as { message?: string } | undefined;
+        summary.errors.push(String(json.message ?? err?.message ?? line));
+        break;
+      }
+    }
+  }
+
+  if (turns > 0) summary.numTurns = turns;
+  return summary;
+}
+
 export class CodexBackend implements AIBackend {
   name = 'codex';
 
   async isAvailable(): Promise<boolean> {
     try {
-      execFileSync(process.platform === 'win32' ? 'where' : 'which', ['codex'], {
-        encoding: 'utf-8',
-      });
+      execFileSync(IS_WINDOWS ? 'where' : 'which', ['codex'], { encoding: 'utf-8' });
       return true;
     } catch {
       return false;
@@ -19,21 +74,40 @@ export class CodexBackend implements AIBackend {
   }
 
   async execute(prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
-    return this._run(['codex', 'exec', prompt, '--json'], opts);
+    // `-` = read the prompt from stdin
+    return this._run(['codex', 'exec', '--json', '-'], prompt, opts);
   }
 
   async resume(sessionId: string, prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
-    return this._run(['codex', 'exec', 'resume', sessionId, prompt], opts);
+    // Session ids come from parsed CLI output; validate before they re-enter
+    // argv (defense in depth for win32 shell mode)
+    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+      throw new Error(`Invalid session id: "${sessionId}"`);
+    }
+    return this._run(['codex', 'exec', 'resume', '--json', sessionId, '-'], prompt, opts);
   }
 
-  private _run(args: string[], opts?: ExecuteOptions): Promise<ExecuteResult> {
+  private _run(args: string[], prompt: string, opts?: ExecuteOptions): Promise<ExecuteResult> {
     const [cmd, ...cmdArgs] = args;
+    const startedAt = Date.now();
     return new Promise((resolve, reject) => {
       const child = spawn(cmd, cmdArgs, {
         cwd: opts?.cwd ?? process.cwd(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         timeout: opts?.timeout,
+        // win32: codex is a .cmd shim that Node cannot spawn directly.
+        // Safe with shell because argv holds only fixed flags + validated
+        // values — the prompt goes through stdin, never the shell.
+        shell: IS_WINDOWS,
       });
+
+      // Prompt via stdin: argv has OS size limits (~256KB single-arg on
+      // macOS) that a large diff + spec prompt can exceed; stdin has none.
+      child.stdin.on('error', () => {
+        // EPIPE when the CLI exits before reading — close event reports it
+      });
+      child.stdin.write(prompt);
+      child.stdin.end();
 
       let stdout = '';
       let stderr = '';
@@ -63,14 +137,23 @@ export class CodexBackend implements AIBackend {
       });
 
       child.on('close', (code, signal) => {
-        const result = this._parseJsonl(stdout);
+        const summary = parseCodexJson(stdout);
+        // Surface stream-level errors where runPrompt already looks for
+        // causes, instead of letting an empty output read as format drift.
+        if (summary.errors.length > 0) {
+          stderr += (stderr.endsWith('\n') || !stderr ? '' : '\n') + summary.errors.join('\n') + '\n';
+        }
         resolve({
-          output: result.output,
-          sessionId: result.sessionId,
+          output: summary.output,
+          sessionId: summary.sessionId,
           exitCode: code ?? 1,
           stderr,
           raw: stdout,
           signal,
+          // codex reports tokens but no cost; duration is measured here so
+          // usage tracking still counts the run.
+          durationMs: Date.now() - startedAt,
+          numTurns: summary.numTurns,
         });
       });
 
@@ -78,26 +161,5 @@ export class CodexBackend implements AIBackend {
         reject(new Error(`Codex CLI error: ${err.message}`));
       });
     });
-  }
-
-  private _parseJsonl(raw: string): { output: string; sessionId: string } {
-    let output = '';
-    let sessionId = '';
-
-    const lines = raw.split('\n').filter((l) => l.trim());
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        if (json.output) output += json.output;
-        if (json.text) output += json.text;
-        if (json.session_id) sessionId = json.session_id;
-        if (json.id) sessionId = json.id;
-      } catch {
-        // Plain text fallback
-        output += line + '\n';
-      }
-    }
-
-    return { output: output.trim(), sessionId };
   }
 }

@@ -40,14 +40,17 @@ export function taskIcon(status: string): string {
 /**
  * Live renderer for streamed backend events: assistant text and tool calls
  * print as they happen, so long AI runs show progress instead of silence.
- * Understands claude stream-json events; falls back to generic text events.
+ * Understands claude stream-json and codex `exec --json` events; falls back
+ * to generic text events.
  */
 export function renderBackendEvent(event: Record<string, unknown>): void {
   const e = event as {
     type?: string;
     message?: { content?: Array<{ type?: string; text?: string; name?: string }> };
     text?: string;
+    item?: { type?: string; text?: string; command?: string };
   };
+  const codexItem = e.item;
 
   if (e.type === 'assistant' && Array.isArray(e.message?.content)) {
     for (const block of e.message.content) {
@@ -60,7 +63,19 @@ export function renderBackendEvent(event: Record<string, unknown>): void {
     return;
   }
 
-  // Generic text event (codex plain output)
+  // codex `exec --json` events: only completed items carry final text
+  if (e.type === 'item.completed' && codexItem) {
+    if (codexItem.type === 'agent_message' && codexItem.text?.trim()) {
+      console.log(chalk.gray(codexItem.text.trimEnd().split('\n').map((l) => `  │ ${l}`).join('\n')));
+    } else if (codexItem.type === 'command_execution' && codexItem.command) {
+      console.log(chalk.dim(`  ⚙ ${codexItem.command}`));
+    } else if (codexItem.type === 'file_change' || codexItem.type === 'mcp_tool_call') {
+      console.log(chalk.dim(`  ⚙ ${codexItem.type}`));
+    }
+    return;
+  }
+
+  // Generic text event (plain, non-JSON output lines)
   if (typeof e.text === 'string' && e.text.trim() && !e.type) {
     console.log(chalk.gray(`  │ ${e.text.trim()}`));
   }
