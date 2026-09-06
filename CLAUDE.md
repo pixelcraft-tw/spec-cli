@@ -30,5 +30,5 @@ npm test         # vitest
 - Zero API dependency — only spawns CLI subprocesses (claude, codex)
 - State stored in `.workflow/state.yaml` (YAML)
 - Prompt templates in `.workflow/prompts/`
-- Reviews always go through `runExpertReview` on the reviewer's own backend (`review.mode`: `agent` | `codex`), in a fresh read-only session — never the implementer session
+- Reviews always go through `runExpertReview` on the reviewer's own backend (`review.mode`: `agent` | `codex`), in a fresh read-only session (claude: editor tools disallowed + no MCP; codex: `-s read-only`) — never the implementer session
 - Codex is spawned as `codex exec --json -` with the prompt on stdin; its JSONL parser (`parseCodexJson`) and the claude one (`parseStreamJson`) are golden-tested

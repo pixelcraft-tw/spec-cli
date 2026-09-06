@@ -69,6 +69,7 @@ describe('buildClaudeArgs', () => {
       '--model', 'opus',
       '--effort', 'xhigh',
       '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit',
+      '--strict-mcp-config',
     ]);
   });
 

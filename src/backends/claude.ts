@@ -23,9 +23,11 @@ export function buildClaudeArgs(opts?: ExecuteOptions): string[] {
     args.push('--effort', opts.effort);
   }
   if (opts?.readOnly) {
-    // Hard gate against the editor tools. Bash stays available so a reviewer
-    // can run git and tests — writing through the shell is a known gap.
-    args.push('--disallowedTools', READ_ONLY_DISALLOWED_TOOLS);
+    // Hard gate against the editor tools, and no MCP servers at all — user
+    // MCP configs routinely expose file-writing tools (serena, filesystem…)
+    // that --disallowedTools would not cover. Bash stays available so a
+    // reviewer can run git and tests; writing through the shell is a known gap.
+    args.push('--disallowedTools', READ_ONLY_DISALLOWED_TOOLS, '--strict-mcp-config');
   }
   return args;
 }

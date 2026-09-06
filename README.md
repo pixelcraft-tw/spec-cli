@@ -160,7 +160,7 @@ Review 永遠不是由寫程式的那個 session 產生。每個 task review 與
 
 | Mode | Reviewer | Model | Effort | Read-only guarantee |
 |------|----------|-------|--------|---------------------|
-| `agent` (default) | Isolated Claude Code process (`claude -p`); `pxs-reviewer` subagent in slash commands | `fable` `opus` `sonnet` `haiku` or a full id | `low` `medium` `high` `xhigh` `max` | Editor tools disabled (`--disallowedTools`) |
+| `agent` (default) | Isolated Claude Code process (`claude -p`); `pxs-reviewer` subagent in slash commands | `fable` `opus` `sonnet` `haiku` or a full id | `low` `medium` `high` `xhigh` `max` | Editor tools disabled (`--disallowedTools`) and no MCP servers (`--strict-mcp-config`) |
 | `codex` | OpenAI Codex CLI (`codex exec`) — cross-vendor second opinion | Any model the local `codex` lists (e.g. `gpt-5.5`) | Model-dependent: `low` `medium` `high` `xhigh` (newer models add `max`/`ultra`) | OS sandbox (`-s read-only`) |
 
 Precedence: CLI flags → the feature's `review:` block in `state.yaml` (chosen by `pxs new`) → `review:` in `config.yaml`:
