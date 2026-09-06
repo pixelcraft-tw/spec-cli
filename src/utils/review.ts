@@ -77,7 +77,7 @@ export function resolveReviewer(
 }
 
 /** One-line label for progress output, e.g. "codex · gpt-5.5 · effort high". */
-export function describeReviewer(reviewer: Reviewer): string {
+export function describeReviewer(reviewer: ReviewChoice): string {
   const parts: string[] = [reviewer.mode];
   if (reviewer.model) parts.push(reviewer.model);
   if (reviewer.effort) parts.push(`effort ${reviewer.effort}`);

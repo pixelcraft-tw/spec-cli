@@ -3,11 +3,19 @@ import inquirer from 'inquirer';
 import { StateManager } from '../state/manager.js';
 import { createBackend } from '../backends/factory.js';
 import { runPrompt } from '../backends/run.js';
+import { CLAUDE_MODEL_CHOICES, codexModelChoices } from '../discovery/models.js';
+import {
+  resolveReviewer,
+  describeReviewer,
+  knownEfforts,
+  type ReviewFlags,
+} from '../utils/review.js';
+import type { ProjectConfig, ReviewChoice, ReviewMode } from '../state/types.js';
 import * as display from '../utils/display.js';
 
 export async function newCommand(
   name: string,
-  options: { desc?: string; jira?: string[]; interactive?: boolean }
+  options: { desc?: string; jira?: string[]; interactive?: boolean } & ReviewFlags
 ): Promise<void> {
   const state = new StateManager();
   state.ensureWorkflow();
@@ -43,6 +51,10 @@ export async function newCommand(
     createBlank(name, state);
   }
 
+  // Independent reviewer for this feature — asked once, after the spec is
+  // written, and remembered in state.yaml so later commands need no flags.
+  const review = await chooseReviewer(state.readConfig().review, options);
+
   // Update state
   state.upsertFeature({
     feature: name,
@@ -52,10 +64,92 @@ export async function newCommand(
     total_tasks: 0,
     current_task: 0,
     tasks: [],
+    ...(review ? { review } : {}),
   });
 
   display.success(`Spec created: ${state.specPath(name)}`);
+  if (review) {
+    display.info(`Reviewer: ${describeReviewer(review)} (change later with --review-mode/--review-model/--review-effort)`);
+  }
   display.info(`Edit the spec, then run \`pxs refine ${name}\``);
+}
+
+const CUSTOM_MODEL = '__custom__';
+
+/**
+ * Pick the reviewer for a new feature. Flags win without prompting. Otherwise
+ * ask interactively — but only when the codex CLI is installed, because
+ * without it `agent` is the only option and the question would be noise.
+ * Choices are lists (model names come from the CLIs), so nothing has to be
+ * remembered or typed. Returns undefined when nothing was chosen, in which
+ * case config.yaml applies.
+ */
+async function chooseReviewer(
+  config: ProjectConfig['review'],
+  flags: ReviewFlags
+): Promise<ReviewChoice | undefined> {
+  if (flags.reviewMode || flags.reviewModel || flags.reviewEffort) {
+    // Validates the mode and normalizes empty values, same as implement will
+    const r = resolveReviewer(config, undefined, flags);
+    return { mode: r.mode, ...(r.model ? { model: r.model } : {}), ...(r.effort ? { effort: r.effort } : {}) };
+  }
+
+  if (!process.stdout.isTTY) return undefined;
+  if (!(await createBackend('codex').isAvailable())) return undefined;
+
+  const { mode } = (await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'mode',
+      message: 'Independent reviewer for this feature:',
+      choices: [
+        { name: 'agent — isolated Claude Code reviewer', value: 'agent' },
+        { name: 'codex — OpenAI Codex CLI (cross-vendor second opinion)', value: 'codex' },
+      ],
+      default: config.mode,
+    },
+  ])) as { mode: ReviewMode };
+
+  const perMode = mode === 'codex' ? config.codex : config.agent;
+  const models = mode === 'codex' ? codexModelChoices() : CLAUDE_MODEL_CHOICES;
+
+  const { model: picked } = (await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'model',
+      message: 'Reviewer model:',
+      choices: [
+        { name: `(default${perMode.model ? `: ${perMode.model}` : ''})`, value: '' },
+        ...models.map((m) => ({ name: m.label, value: m.id })),
+        { name: 'other — type a model id', value: CUSTOM_MODEL },
+      ],
+    },
+  ])) as { model: string };
+
+  let model = picked;
+  if (picked === CUSTOM_MODEL) {
+    ({ model } = (await inquirer.prompt([
+      { type: 'input', name: 'model', message: 'Model id:' },
+    ])) as { model: string });
+    model = model.trim();
+  }
+
+  // Effort choices follow the picked model when the CLI told us what it
+  // supports; otherwise the generic list for that mode.
+  const efforts = models.find((m) => m.id === model)?.efforts ?? knownEfforts(mode);
+  const { effort } = (await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'effort',
+      message: 'Reviewer effort:',
+      choices: [
+        { name: `(default${perMode.effort ? `: ${perMode.effort}` : ''})`, value: '' },
+        ...efforts.map((e) => ({ name: e, value: e })),
+      ],
+    },
+  ])) as { effort: string };
+
+  return { mode, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
 }
 
 function createBlank(name: string, state: StateManager): void {
